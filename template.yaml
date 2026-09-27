@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CourseLens - turn course materials into an actionable learning plan.
+  Minimal serverless backend: one Lambda behind an API Gateway HTTP API,
+  calling Amazon Bedrock (Nova Lite) via the Converse API. Stateless (no DB).
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-lite-v1:0
+    Description: Bedrock model id used for all Converse calls.
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: Region where Bedrock is invoked.
+  CorsAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: >
+      Allowed CORS origin for the API. "*" for early development; set to the
+      CloudFront domain once the frontend is deployed.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    # Cost-conscious sizing. The work is I/O-bound (waiting on Bedrock), so a
+    # small memory footprint is fine; 512 MB gives enough headroom for pypdf /
+    # python-docx parsing without over-paying.
+    MemorySize: 512
+    # Bedrock generation for a full analysis can take a few seconds; 30s leaves
+    # comfortable margin while capping worst-case cost per invocation.
+    Timeout: 30
+    Architectures:
+      - arm64  # Graviton: cheaper per-ms than x86 for the same work.
+
+Resources:
+  CourseLensApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: courselens-http-api
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref CorsAllowOrigin
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - POST
+          - OPTIONS
+
+  CourseLensFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: courselens-api
+      Description: CourseLens API handler (analyze + explain).
+      CodeUri: src/
+      Handler: courselens.api.handler
+      Environment:
+        Variables:
+          COURSELENS_MODEL_ID: !Ref BedrockModelId
+          COURSELENS_AWS_REGION: !Ref BedrockRegion
+      Policies:
+        # Least-privilege: allow only Bedrock model invocation, scoped to the
+        # Amazon Nova model family in the configured region/account. No other
+        # AWS permissions are granted.
+        - Statement:
+            - Sid: InvokeBedrockNovaModels
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-*
+      Events:
+        Analyze:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CourseLensApi
+            Path: /analyze
+            Method: POST
+        Explain:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CourseLensApi
+            Path: /explain
+            Method: POST
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL of the CourseLens HTTP API.
+    Value: !Sub https://${CourseLensApi}.execute-api.${AWS::Region}.amazonaws.com
+  FunctionName:
+    Description: CourseLens Lambda function name.
+    Value: !Ref CourseLensFunction
