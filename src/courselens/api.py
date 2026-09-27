@@ -33,6 +33,7 @@ from .errors import (
     ScannedDocumentError,
     UnsupportedFileTypeError,
 )
+from .prompts import DOCUMENT_TYPES
 
 logger = logging.getLogger("courselens.api")
 logger.setLevel(logging.INFO)
@@ -46,9 +47,15 @@ CORS_HEADERS = {
     "Access-Control-Allow-Methods": "POST,OPTIONS",
 }
 
-# Cap the decoded request body to avoid pathological payloads. API Gateway
-# also caps at 10MB; this is a defensive inner bound aligned with MVP-sized docs.
-MAX_BODY_BYTES = 8 * 1024 * 1024  # 8 MB
+# Strict decoded request-body and file caps come from config (default 2 MB
+# each). API Gateway also caps payloads at 10 MB; these are much tighter
+# application-level bounds aligned with MVP-sized documents.
+MAX_BODY_BYTES = config.MAX_REQUEST_BYTES
+MAX_FILE_BYTES = config.MAX_FILE_BYTES
+
+# base64 inflates size by ~4/3; reject obviously oversized encoded strings
+# before spending CPU decoding them.
+_MAX_B64_LEN = (MAX_FILE_BYTES * 4) // 3 + 16
 
 
 class ApiError(Exception):
@@ -86,23 +93,36 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         raise ApiError(404, f"No route for {path}.", "not_found")
 
     except ApiError as exc:
+        # ApiError messages are authored by us and safe to return.
         return _error(exc.status, exc.code, str(exc))
     except (
         EmptyInputError,
         UnsupportedFileTypeError,
         ScannedDocumentError,
     ) as exc:
-        # Client-correctable input problems -> 422.
+        # Client-correctable input problems -> 422. These messages are
+        # intentionally user-facing and contain no internal detail.
         return _error(422, _error_code(exc), str(exc))
-    except ExtractionError as exc:
-        return _error(422, "extraction_failed", str(exc))
-    except (BedrockError, ModelOutputError) as exc:
-        # Upstream/model failures -> 502.
+    except ExtractionError:
+        # Detail may include library/parse internals -> log, return generic.
+        logger.exception("Extraction failed")
+        return _error(
+            422,
+            "extraction_failed",
+            "The document could not be processed. Please try a different file "
+            "or paste the text directly.",
+        )
+    except (BedrockError, ModelOutputError):
+        # Upstream/model failures may include AWS/internal detail -> log only.
         logger.exception("Upstream model error")
-        return _error(502, "model_error", str(exc))
-    except CourseLensError as exc:
+        return _error(
+            502,
+            "model_error",
+            "The analysis service is temporarily unavailable. Please try again.",
+        )
+    except CourseLensError:
         logger.exception("CourseLens error")
-        return _error(500, "internal_error", str(exc))
+        return _error(500, "internal_error", "An unexpected error occurred.")
     except Exception:  # noqa: BLE001 - final safety net
         logger.exception("Unhandled error")
         return _error(500, "internal_error", "An unexpected error occurred.")
@@ -115,8 +135,15 @@ def _handle_analyze(body: dict[str, Any]) -> dict[str, Any]:
     input_type = body.get("inputType")
     override = body.get("overrideType")
 
-    if override is not None and not isinstance(override, str):
-        raise ApiError(400, "'overrideType' must be a string when provided.")
+    if override is not None:
+        if not isinstance(override, str):
+            raise ApiError(400, "'overrideType' must be a string when provided.")
+        if override not in DOCUMENT_TYPES:
+            raise ApiError(
+                400,
+                "'overrideType' must be one of: " + ", ".join(DOCUMENT_TYPES) + ".",
+                "invalid_override_type",
+            )
 
     if input_type == "text":
         text = body.get("text")
@@ -176,7 +203,8 @@ def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", errors="replace")
 
-    if len(raw) > MAX_BODY_BYTES:
+    # Enforce the strict body cap on actual byte length (UTF-8), not char count.
+    if len(raw.encode("utf-8")) > MAX_BODY_BYTES:
         raise ApiError(413, "Request body too large.", "payload_too_large")
 
     try:
@@ -190,11 +218,14 @@ def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _decode_base64(value: str) -> bytes:
+    # Reject oversized encoded input before spending CPU on decoding.
+    if len(value) > _MAX_B64_LEN:
+        raise ApiError(413, "Uploaded file is too large.", "payload_too_large")
     try:
         data = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ApiError(400, "'fileContentBase64' is not valid base64.") from exc
-    if len(data) > MAX_BODY_BYTES:
+    if len(data) > MAX_FILE_BYTES:
         raise ApiError(413, "Uploaded file is too large.", "payload_too_large")
     return data
 

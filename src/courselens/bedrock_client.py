@@ -59,8 +59,21 @@ class BedrockRuntime:
         if self._client is None:
             # Imported lazily so unit tests don't require boto3/credentials.
             import boto3  # noqa: PLC0415
+            from botocore.config import Config as BotoConfig  # noqa: PLC0415
 
-            self._client = boto3.client("bedrock-runtime", region_name=self._region)
+            # Bound the SDK's automatic retries so a transient failure cannot
+            # silently multiply into many billable Bedrock invocations.
+            boto_config = BotoConfig(
+                retries={
+                    "max_attempts": config.BEDROCK_MAX_ATTEMPTS,
+                    "mode": "standard",
+                }
+            )
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=self._region,
+                config=boto_config,
+            )
         return self._client
 
     def converse_text(

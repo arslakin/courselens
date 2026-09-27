@@ -219,7 +219,11 @@ def test_bedrock_error_maps_to_502(monkeypatch):
     monkeypatch.setattr(api.pipeline, "analyze_text", boom)
     resp = api.handler(make_event(body={"inputType": "text", "text": "x"}))
     assert resp["statusCode"] == 502
-    assert _body(resp)["error"]["code"] == "model_error"
+    body = _body(resp)
+    assert body["error"]["code"] == "model_error"
+    # Safe error handling: the internal exception detail must NOT leak to the
+    # client. Only a generic message is returned.
+    assert "bedrock down" not in body["error"]["message"]
 
 
 def test_unsupported_file_type_maps_to_422(monkeypatch):
@@ -241,3 +245,84 @@ def test_unsupported_file_type_maps_to_422(monkeypatch):
     )
     assert resp["statusCode"] == 422
     assert _body(resp)["error"]["code"] == "unsupported_file_type"
+
+
+# -- production-readiness safeguards ----------------------------------------
+
+
+def test_invalid_override_type_enum_is_400():
+    resp = api.handler(
+        make_event(body={"inputType": "text", "text": "x", "overrideType": "banana"})
+    )
+    assert resp["statusCode"] == 400
+    assert _body(resp)["error"]["code"] == "invalid_override_type"
+
+
+def test_valid_override_type_enum_accepted(stub_pipeline):
+    resp = api.handler(
+        make_event(
+            body={"inputType": "text", "text": "x", "overrideType": "reading"}
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert stub_pipeline["analyze_text"]["doc_type"] == "reading"
+
+
+def test_oversized_request_body_is_413(monkeypatch):
+    # Shrink the cap so the test stays fast, then exceed it.
+    monkeypatch.setattr(api, "MAX_BODY_BYTES", 100)
+    big_text = "x" * 500
+    resp = api.handler(make_event(body={"inputType": "text", "text": big_text}))
+    assert resp["statusCode"] == 413
+    assert _body(resp)["error"]["code"] == "payload_too_large"
+
+
+def test_oversized_file_is_413(monkeypatch):
+    monkeypatch.setattr(api, "MAX_FILE_BYTES", 50)
+    monkeypatch.setattr(api, "_MAX_B64_LEN", 10_000)  # let it reach the byte check
+    content = base64.b64encode(b"y" * 500).decode()
+    resp = api.handler(
+        make_event(
+            body={
+                "inputType": "file",
+                "fileName": "big.txt",
+                "fileContentBase64": content,
+            }
+        )
+    )
+    assert resp["statusCode"] == 413
+
+
+def test_oversized_base64_string_rejected_early(monkeypatch):
+    monkeypatch.setattr(api, "_MAX_B64_LEN", 20)
+    resp = api.handler(
+        make_event(
+            body={
+                "inputType": "file",
+                "fileName": "big.txt",
+                "fileContentBase64": "A" * 100,
+            }
+        )
+    )
+    assert resp["statusCode"] == 413
+
+
+def test_extraction_error_message_is_generic(monkeypatch):
+    from courselens.errors import ExtractionError
+
+    def boom(*args, **kwargs):
+        raise ExtractionError("pypdf internal detail xyz")
+
+    monkeypatch.setattr(api.pipeline, "analyze_file", boom)
+    content = base64.b64encode(b"data").decode()
+    resp = api.handler(
+        make_event(
+            body={
+                "inputType": "file",
+                "fileName": "x.pdf",
+                "fileContentBase64": content,
+            }
+        )
+    )
+    assert resp["statusCode"] == 422
+    assert "pypdf internal detail" not in _body(resp)["error"]["message"]

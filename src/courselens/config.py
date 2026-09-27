@@ -26,6 +26,12 @@ BEDROCK_MODEL_ID: str = os.environ.get(
 MAX_TOKENS: int = int(os.environ.get("COURSELENS_MAX_TOKENS", "2000"))
 TEMPERATURE: float = float(os.environ.get("COURSELENS_TEMPERATURE", "0.2"))
 
+# Bounded number of automatic retries the AWS SDK performs per Bedrock call.
+# Kept low so a transient error cannot silently multiply into many billable
+# invocations. Combined with the single application-level JSON retry, the
+# worst-case number of Converse calls per analysis stays small and predictable.
+BEDROCK_MAX_ATTEMPTS: int = int(os.environ.get("COURSELENS_BEDROCK_MAX_ATTEMPTS", "2"))
+
 # --- Input safeguards -------------------------------------------------------
 
 # Hard cap on characters sent to the model. Protects against oversized inputs
@@ -39,4 +45,19 @@ MAX_INPUT_CHARS: int = int(os.environ.get("COURSELENS_MAX_INPUT_CHARS", "20000")
 # raise a friendly "OCR not supported yet" message instead of failing silently.
 MIN_EXTRACTED_CHARS: int = int(
     os.environ.get("COURSELENS_MIN_EXTRACTED_CHARS", "20")
+)
+
+# --- Request-size safeguards (API layer) ------------------------------------
+
+# Strict maximum size of a decoded request body. Deliberately small: the MVP
+# handles short documents, so anything larger is almost certainly a mistake or
+# abuse. This bounds both memory and downstream cost. (API Gateway also caps
+# payloads at 10 MB; this is a much tighter application-level bound.)
+MAX_REQUEST_BYTES: int = int(
+    os.environ.get("COURSELENS_MAX_REQUEST_BYTES", str(2 * 1024 * 1024))  # 2 MB
+)
+
+# Strict maximum size of a decoded uploaded file (from fileContentBase64).
+MAX_FILE_BYTES: int = int(
+    os.environ.get("COURSELENS_MAX_FILE_BYTES", str(2 * 1024 * 1024))  # 2 MB
 )

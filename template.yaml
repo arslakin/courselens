@@ -20,6 +20,17 @@ Parameters:
     Description: >
       Allowed CORS origin for the API. "*" for early development; set to the
       CloudFront domain once the frontend is deployed.
+  ThrottleRateLimit:
+    Type: Number
+    Default: 5
+    Description: >
+      Steady-state requests/second allowed across the API (token-bucket refill
+      rate). Conservative for a hackathon demo; caps sustained Bedrock usage.
+  ThrottleBurstLimit:
+    Type: Number
+    Default: 10
+    Description: >
+      Maximum concurrent request burst before API Gateway returns HTTP 429.
 
 Globals:
   Function:
@@ -47,6 +58,13 @@ Resources:
         AllowMethods:
           - POST
           - OPTIONS
+      # Stage-level default throttling. This is a native API Gateway setting —
+      # it adds no extra infrastructure and no cost, and returns HTTP 429 when
+      # limits are exceeded. It is the primary protection against accidental or
+      # abusive Bedrock usage for the public demo.
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottleRateLimit
+        ThrottlingBurstLimit: !Ref ThrottleBurstLimit
 
   CourseLensFunction:
     Type: AWS::Serverless::Function
