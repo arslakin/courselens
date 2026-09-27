@@ -1,0 +1,109 @@
+# CourseLens
+
+**CourseLens turns course materials into an actionable learning plan.**
+
+CourseLens is an AI study assistant built for the AWS "Zero to Shipped"
+hackathon. A student uploads or pastes a course document; CourseLens identifies
+what kind of material it is and then applies the right strategy — explaining an
+assignment and building a step-by-step action plan, or summarizing lecture
+notes/readings and generating a study quiz.
+
+Its guiding principle: **guide students through their work, never do it for
+them.**
+
+## Problem
+
+Students are handed dense assignments, lecture notes, and readings with little
+guidance on *how* to approach them. Assignments in particular bury requirements,
+deliverables, deadlines, and constraints in prose. CourseLens reads the material
+and turns it into something actionable — an explanation, a plan, and the
+concepts to learn — without producing submittable answers.
+
+## Features
+
+- **Automatic document-type classification:** assignment, lecture notes,
+  reading, syllabus, rubric, dataset, or other.
+- **Assignment workflow:** plain-language explanation, requirements,
+  deliverables, deadlines, constraints, a step-by-step action plan, and the
+  concepts the student needs to understand.
+- **Lecture / reading workflow:** concise summary, key concepts, plain-language
+  explanations of difficult concepts, and a 5-question study quiz.
+- **Explain further:** drill into any single step or concept on demand.
+- **Input safeguards:** oversized inputs are capped; scanned/image-only
+  documents are detected and reported instead of failing silently.
+- **Anti-cheating guardrail:** the assistant helps you understand and plan; it
+  will not write your essay, solution, or code.
+
+## Architecture
+
+Minimal and serverless. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+
+```
+Browser (static SPA)  ->  API Gateway (HTTP API)  ->  AWS Lambda (Python)  ->  Amazon Bedrock (Nova Lite, Converse, us-east-1)
+```
+
+Frontend: static site on S3 + CloudFront. Backend: a single Lambda behind an
+HTTP API. AI: Amazon Bedrock Nova Lite via the Converse API. The MVP is
+stateless — no database.
+
+## How it works
+
+1. **Upload / paste** a course document.
+2. **Understand:** CourseLens extracts the text and classifies the document type.
+3. **Explain:** it explains the material in plain language.
+4. **Plan:** for assignments, it builds a step-by-step action plan and lists the
+   concepts to learn.
+5. **Study:** for lecture notes/readings, it produces a summary and a quiz; any
+   step or concept can be explained further.
+
+## Supported files
+
+MVP: **pasted text, PDF, DOCX, TXT, and Markdown.**
+
+Detected but not yet supported (planned post-hackathon): PPTX, CSV/spreadsheets,
+and images/screenshots (OCR). Scanned/image-only PDFs are detected and reported.
+
+## Local setup
+
+Requires Python 3.11+.
+
+```bash
+# from the repo root
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+# run the tests (uses a fake Bedrock client — no AWS calls)
+pytest
+```
+
+The backend logic lives in `src/courselens/`. The core entry points are in
+`pipeline.py` (`analyze_text`, `analyze_file`, `explain_further`).
+
+To run against real Bedrock locally you need AWS credentials with Bedrock access
+in `us-east-1`; the model defaults to `amazon.nova-lite-v1:0` and can be
+overridden with the `COURSELENS_MODEL_ID` environment variable.
+
+## AWS deployment
+
+Deployment uses AWS SAM and is intentionally deferred until the core is proven
+locally. Deployment steps will be documented here once the backend is wrapped in
+Lambda + API Gateway and the frontend is added. **No AWS resources are created
+by the current codebase.**
+
+## Cost-conscious design
+
+- Serverless, pay-per-request compute (Lambda + API Gateway) with no idle cost.
+- Nova Lite, one of the cheapest Bedrock text models; input is size-capped
+  before every call.
+- No persistent or always-on services (no DynamoDB, RDS, ECS, EC2, etc.).
+- Static frontend hosting (S3 + CloudFront) is inexpensive.
+
+## Hackathon information
+
+Built for the **AWS "Zero to Shipped"** hackathon. Region: **us-east-1**. Model:
+**Amazon Nova Lite** via the Bedrock **Converse** API. Infrastructure: **AWS
+SAM**. Development is logged in [PROJECT_STEPS.md](./PROJECT_STEPS.md).
+
+CourseLens is a standalone project and is kept fully separate from any other
+work; all its AWS resources are prefixed with `courselens`.
