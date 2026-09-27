@@ -105,7 +105,11 @@ Behavior:
 
 ## SAM template (`template.yaml`)
 
-- `AWS::Serverless::HttpApi` — `courselens-http-api`, with CORS config.
+- `AWS::Serverless::HttpApi` — `courselens-http-api`, with CORS config and
+  **stage-level default throttling** (`DefaultRouteSettings`:
+  `ThrottlingRateLimit`/`ThrottlingBurstLimit`, defaults 5 req/s, burst 10).
+  This is a native API Gateway setting — no extra infrastructure, no cost — and
+  is the primary guard against abusive/accidental Bedrock usage.
 - `AWS::Serverless::Function` — `courselens-api`:
   - Runtime **python3.12**, **arm64** (Graviton — cheaper per-ms).
   - **512 MB** memory, **30 s** timeout (work is I/O-bound on Bedrock; small

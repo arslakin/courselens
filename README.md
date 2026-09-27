@@ -141,6 +141,28 @@ frontend is hosted as a static site (S3 + CloudFront) in a later step.
 - No persistent or always-on services (no DynamoDB, RDS, ECS, EC2, etc.).
 - Static frontend hosting (S3 + CloudFront) is inexpensive.
 
+### Cost & abuse safeguards
+
+- **API Gateway throttling** (native stage setting, no extra infrastructure):
+  conservative 5 req/s with a burst of 10; excess returns HTTP 429.
+- **Strict input limits:** 2 MB request/file caps and a 20,000-character input
+  truncation before any model call; bounded SDK + app retries.
+- **Server-side model control:** the client cannot select the model.
+- **Safe errors:** internal/AWS detail is never returned to clients.
+
+### Verified Nova Lite pricing (us-east-1, on-demand)
+
+From the AWS Price List API: **input $0.06 / 1M tokens**, **output $0.24 / 1M
+tokens**. One analysis is two model calls.
+
+| Scenario | Per analysis | 100 | 1,000 |
+|---|---|---|---|
+| Normal | ~$0.0003 | ~$0.03 | ~$0.33 |
+| Worst case | ~$0.0024 | ~$0.24 | ~$2.40 |
+
+A **$5–$10 AWS Budgets** cost alert is recommended as a safety net (the first
+two budgets are free). See [PROJECT_STEPS.md](./PROJECT_STEPS.md).
+
 ## Hackathon information
 
 Built for the **AWS "Zero to Shipped"** hackathon. Region: **us-east-1**. Model:

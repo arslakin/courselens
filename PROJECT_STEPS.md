@@ -173,3 +173,102 @@ complete and tested locally.
 HTTP API + Lambda, then host the frontend on S3 + CloudFront. **Deployment is
 paused pending explicit approval** — no `sam deploy` has been run and no AWS
 resources have been created.
+
+---
+
+## Phase 5 — Production-readiness & cost-protection pass (pre-deploy)
+
+Goal: protect against accidental/abusive Bedrock usage while keeping the demo
+easy to use and the infrastructure minimal. No Cognito, DynamoDB, WAF, or other
+paid/persistent services added.
+
+**A. Protection review — simplest appropriate approach.**
+For a public hackathon demo, the simplest effective protection is
+**API Gateway HTTP API stage-level throttling** (native, no extra
+infrastructure, no cost) combined with **strict application-level input
+limits**. This keeps the demo open (no login) while capping how fast and how
+large requests can be — which is what bounds Bedrock spend.
+
+**B. Application-level safeguards implemented.**
+- **Strict request/file size caps:** decoded request body and uploaded file are
+  each capped at 2 MB (`MAX_REQUEST_BYTES`, `MAX_FILE_BYTES`); oversized
+  base64 is rejected *before* decoding. Returns HTTP 413.
+- **Existing input/token truncation retained:** text truncated to
+  `MAX_INPUT_CHARS` (20,000) before any model call; scanned-doc detection.
+- **Early rejection of malformed requests:** method/route/body/JSON/field
+  validation all happen before any Bedrock call; `overrideType` is validated
+  against the allowed enum (invalid → 400).
+- **Bounded retries:** the AWS SDK is configured with
+  `max_attempts = BEDROCK_MAX_ATTEMPTS` (2), plus a single application-level
+  JSON-parse retry — so the worst case is a small, predictable number of
+  Converse calls per analysis.
+- **No client model selection:** the model id is controlled entirely
+  server-side (`config.BEDROCK_MODEL_ID`, env-overridable). The client cannot
+  choose or influence the model; `overrideType` only affects document
+  classification.
+- **Safe error handling:** upstream/model/extraction/internal errors are logged
+  server-side but return generic messages — no AWS or internal detail is
+  exposed to clients. Only intentional, user-facing validation/input messages
+  are returned.
+- **Reasonable Lambda timeout:** 30 s (bounds worst-case billable duration).
+
+**C. API Gateway throttling (SAM, no new infrastructure).**
+`AWS::Serverless::HttpApi` supports stage `DefaultRouteSettings`. Configured
+conservatively via parameters: `ThrottlingRateLimit = 5` req/s steady-state and
+`ThrottlingBurstLimit = 10`. Exceeding these returns HTTP 429. This is a native
+API Gateway setting — it adds no resources and no cost.
+
+**D. AWS Budget / cost-alert recommendation (NOT created).**
+Recommended before or right after deployment, as a safety net independent of
+the app-level caps:
+
+- Create a single **AWS Budgets** monthly cost budget (e.g. **$5 or $10**) with
+  email alerts at 50% / 80% / 100% of the threshold. AWS Budgets allows a small
+  number of budgets **at no charge** (the first two budgets are free), so this
+  adds negligible/no cost.
+- Optionally scope the budget with a cost-allocation tag (e.g. tag CourseLens
+  resources `project=courselens`) so the alert reflects only this project.
+- This can be created in the Billing console in a couple of minutes, or later
+  via IaC. It is intentionally **left uncreated** here to avoid touching the
+  account before deployment approval, and because it needs billing-scope
+  permissions the deploy identity may not have.
+
+> Suggested CLI (for reference only — not executed):
+> `aws budgets create-budget ...` with a `COST` budget of $10/month and an
+> `SNS`/email notification at 80%.
+
+**E. Verified Amazon Nova Lite pricing (us-east-1, on-demand).**
+Retrieved from the **AWS Price List API** (`aws pricing get-products
+--service-code AmazonBedrock`), not estimated:
+
+| Token type | Price |
+|---|---|
+| Input  | **$0.00006 per 1K tokens** ($0.06 / 1M) |
+| Output | **$0.00024 per 1K tokens** ($0.24 / 1M) |
+
+Cost model: one "analysis" = 2 Converse calls (classify + workflow); worst case
+adds one JSON-retry call. Token estimate uses ~4 characters per token.
+
+| Scenario | Per analysis | 100 analyses | 1,000 analyses |
+|---|---|---|---|
+| Normal (~4k-char input, ~740 output tokens) | ~**$0.0003** | ~**$0.03** | ~**$0.33** |
+| Conservative worst case (20k-char input, 2,000 output tokens/call, classify + workflow + 1 retry) | ~**$0.0024** | ~**$0.24** | ~**$2.40** |
+
+Even the worst case for 1,000 full analyses is a few dollars of Bedrock spend.
+API Gateway and Lambda at this volume are within/near the free tier and
+negligible by comparison.
+
+**F. Tests.** Added safeguard tests (override-type enum validation, 413 size
+caps, early base64 rejection, generic error messages that don't leak internals,
+bounded-retry client config). Full suite: **59 passed.**
+
+**Kiro's role.** Kiro reviewed the API, implemented the safeguards, added native
+API Gateway throttling in SAM, verified live Nova Lite pricing via the AWS
+Pricing API, computed the cost estimates, and updated the tests and docs — all
+without creating any AWS resources.
+
+**Milestone:** CourseLens is production-ready for a low-risk public demo,
+pending deploy approval.
+
+**Next step:** deploy with AWS SAM. **Paused pending explicit approval** — no
+`sam deploy` run and no AWS resources created.
