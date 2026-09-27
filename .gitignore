@@ -39,3 +39,6 @@ Thumbs.db
 # Local scratch / test fixtures that are large or generated
 tmp/
 scratch/
+
+# SAM CLI local install venv (dev tooling)
+.sam-venv/

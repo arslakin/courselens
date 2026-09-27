@@ -85,7 +85,7 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName: courselens-api-execution-policy
-      Description: >
+      Description: >-
         Runtime permissions for the CourseLens Lambda: CloudWatch Logs and
         Bedrock InvokeModel for the configured Amazon Nova model only.
       PolicyDocument:

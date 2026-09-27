@@ -272,3 +272,73 @@ pending deploy approval.
 
 **Next step:** deploy with AWS SAM. **Paused pending explicit approval** — no
 `sam deploy` run and no AWS resources created.
+
+---
+
+## Phase 6 — First backend deployment (AWS SAM)
+
+Goal: deploy the CourseLens backend under its own isolated identity, with no
+impact on RojAI/Dengbej. Frontend deployment intentionally deferred.
+
+**Deployment identity & guardrails.**
+- Deployed exclusively with the dedicated `--profile courselens`
+  (`courselens-deployer`); the default profile / `rojai-deployer` was never used
+  for application deployment.
+- SAM artifacts use a dedicated private bucket `courselens-sam-artifacts-*`
+  (Block Public Access on, SSE-S3, no public policy) — `--resolve-s3` avoided.
+- Least-privilege deploy policy iterated additively as real deploys surfaced
+  genuinely-required actions (each approved and applied out-of-band by an admin,
+  then synced into `iam/courselens-deploy-policy.json`):
+  - `cloudformation:CreateChangeSet` on the SAM transform
+    (`aws:transform/Serverless-2016-10-31`).
+  - `apigateway:TagResource` scoped to `/apis/*/stages` (SAM tags the stage).
+- One template fix: the Lambda execution managed-policy `Description` used a
+  folded scalar (`>`) whose trailing newline is rejected by IAM; changed to
+  `>-`. (A formatting validation issue, not a permission problem.)
+
+**Stack.** `courselens` — `CREATE_COMPLETE`. Seven resources, all CourseLens:
+- `AWS::ApiGatewayV2::Api` (HTTP API) + `$default` `AWS::ApiGatewayV2::Stage`
+- `AWS::IAM::ManagedPolicy` `courselens-api-execution-policy`
+- `AWS::IAM::Role` `courselens-api-execution-role`
+- `AWS::Lambda::Function` `courselens-api`
+- two `AWS::Lambda::Permission` (analyze + explain routes)
+
+The API base URL is a stack output (`ApiBaseUrl`); it is intentionally not
+recorded here.
+
+**Execution-role verification (post-deploy).**
+- Permissions boundary attached: `courselens-execution-boundary`.
+- Only the intended `courselens-api-execution-policy` attached; no inline
+  policies; no `AdministratorAccess` or unrelated permissions.
+- Nova invocation confirmed end-to-end via live API tests (below).
+- Stage throttling live: rate 5 req/s, burst 10.
+- Lambda: python3.12, arm64, 512 MB, 30 s timeout.
+
+**Real end-to-end smoke tests (live API + Bedrock).**
+Small synthetic inputs (no private student data); all returned HTTP 200 with
+genuine Bedrock output and token usage:
+
+| Test | Route | Result |
+|---|---|---|
+| Assignment | `/analyze` | classified `assignment`; full plan + concepts |
+| Lecture notes | `/analyze` | summary + 5-question quiz |
+| Reading | `/analyze` | summary + 5-question quiz |
+| Explain further | `/explain` | plain-language explanation |
+
+- Total token usage across tests: ~1,224 input + ~1,461 output ≈ **2,685 tokens**.
+- Estimated Bedrock cost of the tests: **~$0.0004** (Nova Lite on-demand).
+- Responses scanned: no AWS/internal detail or credentials leaked.
+
+**Observation limitation.** CloudWatch `GetLogEvents` was not attempted because
+reading log events is outside the deploy identity's permissions; log-group
+creation is covered, but log inspection would need a separate read grant.
+
+**Cost/resource check.** Only the expected resources exist (7 stack resources +
+the private artifact bucket). No always-on/costly services; Lambda + HTTP API
+are pay-per-use with no idle cost.
+
+**Milestone:** CourseLens backend is live and serving genuine Bedrock responses
+under an isolated, least-privilege identity.
+
+**Next step:** frontend deployment (S3 + CloudFront) — **not started**; to be
+reviewed separately. No frontend resources created yet.

@@ -35,6 +35,16 @@
       "Resource": "*"
     },
     {
+      "Sid": "CloudFormationSamTransformOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
+      ]
+    },
+    {
       "Sid": "LambdaCourseLensFunctionsOnly",
       "Effect": "Allow",
       "Action": [
@@ -72,6 +82,12 @@
         "arn:aws:apigateway:us-east-1::/apis/*",
         "arn:aws:apigateway:us-east-1::/tags/*"
       ]
+    },
+    {
+      "Sid": "CourseLensStageCreationTagging",
+      "Effect": "Allow",
+      "Action": "apigateway:TagResource",
+      "Resource": "arn:aws:apigateway:us-east-1::/apis/*/stages"
     },
     {
       "Sid": "IamCreateBoundedCourseLensRoleOnly",
