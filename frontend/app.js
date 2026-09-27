@@ -1,16 +1,23 @@
 /* CourseLens frontend logic.
  *
  * Plain vanilla JS, no build step. Talks to the /analyze and /explain API
- * endpoints. When no API_BASE_URL is configured it falls back to DEMO MODE
- * with canned results so the full UI + My Notes can be walked through locally
- * without a backend.
+ * endpoints.
+ *
+ * Demo mode (canned local results, no backend) is OPT-IN only: it requires
+ * COURSELENS_CONFIG.DEMO_MODE === true or a "?demo=1" query parameter. The
+ * deployed production site never enables it, so it can never silently fall
+ * back to mock data — if the real API fails, the student sees a clear error.
  */
 (function () {
   "use strict";
 
-  var CONFIG = window.COURSELENS_CONFIG || { API_BASE_URL: "" };
+  var CONFIG = window.COURSELENS_CONFIG || {};
   var API_BASE = (CONFIG.API_BASE_URL || "").replace(/\/$/, "");
-  var DEMO_MODE = !API_BASE;
+  var DEMO_REQUESTED =
+    CONFIG.DEMO_MODE === true ||
+    /[?&]demo=1\b/.test(window.location.search);
+  // Demo mode only when explicitly requested. Never inferred from a missing URL.
+  var DEMO_MODE = DEMO_REQUESTED;
 
   // Human-readable labels for document types.
   var TYPE_LABELS = {
@@ -34,9 +41,17 @@
     wireNotes();
     if (DEMO_MODE) {
       setStatus(
-        "Demo mode: no API configured, showing sample results. Set API_BASE_URL in config.js to use Bedrock.",
+        "Demo mode: showing sample results locally (no live analysis).",
         ""
       );
+    } else if (!API_BASE) {
+      // Production must have a real API. If it's missing, fail loud — never
+      // silently serve mock data.
+      setStatus(
+        "Configuration error: the CourseLens API is not configured. Please try again later.",
+        "error"
+      );
+      if (el["analyze-btn"]) el["analyze-btn"].disabled = true;
     }
   });
 

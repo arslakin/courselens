@@ -342,3 +342,58 @@ under an isolated, least-privilege identity.
 
 **Next step:** frontend deployment (S3 + CloudFront) — **not started**; to be
 reviewed separately. No frontend resources created yet.
+
+---
+
+## Phase 7 — Frontend deployment: CourseLens v1 is live
+
+Goal: ship a public website a student can open and use. Static frontend on
+S3 + CloudFront, wired to the live backend.
+
+**Live URL:** https://d3o9p9y1e35hxv.cloudfront.net
+
+**Frontend production wiring.**
+- `config.js` points at the live API and sets `DEMO_MODE: false`.
+- Demo mode is now **opt-in only** (`DEMO_MODE: true` or `?demo=1`); production
+  can never silently fall back to mock data. If the API fails, the student sees
+  a clear error.
+
+**Frontend-hosting IAM (approved, minimal, additive).**
+Deploying the site needed permissions the backend deploy policy lacked. The
+exact denials were reported (`cloudfront:*`, `s3:CreateBucket` on a web bucket),
+and only after approval were two statements added to `courselens-deploy-policy`
+(now v4): S3 on `courselens-web-*` and CloudFront distribution/OAC management.
+No `s3:*`, no `cloudfront:*`, no admin, boundary untouched. All application
+deployment continued under `--profile courselens`.
+
+**Resources created (frontend).**
+- Private S3 bucket `courselens-web-<account>` — Block Public Access on, SSE-S3,
+  reachable only via CloudFront (OAC + `AWS:SourceArn` bucket policy).
+- CloudFront Origin Access Control (sigv4).
+- One CloudFront distribution — HTTPS (`redirect-to-https`), `index.html` root,
+  CachingOptimized, `PriceClass_100`.
+
+**Public end-to-end test (live site + Bedrock).**
+- Site loads over HTTPS; CSS/JS load; HTTP redirects to HTTPS.
+- Served `config.js` confirms the real API and `DEMO_MODE: false`.
+- Assignment sample ("3-page essay… Due Friday… 3 sources") → classified
+  `assignment` with requirements, deliverables, deadline, 5-step action plan,
+  and concepts (genuine Bedrock, ~1,140 tokens).
+- Lecture sample → summary + key concepts + 5-question quiz.
+- Explain Further → real plain-language explanation.
+- PDF / DOCX / TXT uploads → correct auto-classification and genuine results.
+- My Notes (add/edit/Copy All/Clear/.md/.txt/localStorage) verified against the
+  deployed `app.js`.
+- Layout is responsive (two columns → single column on mobile widths).
+
+**Cost posture.** All pay-per-use, no always-on cost. Bedrock is the main
+lever: ~$0.0003/analysis normal (~$0.30 per 1,000). CloudFront/S3/Lambda/API
+Gateway are within or near free tier at demo volume. A $5–$10 AWS Budgets alert
+is recommended.
+
+**Privacy.** No credentials or secrets in the frontend; the browser calls only
+the public CourseLens API; uploaded documents are read client-side and not
+persisted by the frontend; notes stay in browser localStorage; no analytics or
+third-party scripts.
+
+**Milestone:** CourseLens v1 is complete and publicly usable.

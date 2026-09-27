@@ -123,16 +123,39 @@ Behavior:
 
 ## Frontend (`frontend/`)
 
-Static site (plain HTML/CSS/JS, no build step) intended for S3 + CloudFront.
+Static site (plain HTML/CSS/JS, no build step), hosted on S3 + CloudFront.
 
 - `index.html` — single-page layout following Upload → Understand → Explain →
   Plan → Study → Take Notes.
-- `styles.css` — styling, responsive two-column layout (results + notes).
-- `config.js` — holds `API_BASE_URL`. When empty, the app runs in **demo
-  mode** with canned results so the UI works with no backend.
+- `styles.css` — styling, responsive two-column layout (results + notes) that
+  collapses to a single column on narrow/mobile widths.
+- `config.js` — holds `API_BASE_URL` (the live API) and `DEMO_MODE`.
 - `app.js` — input handling (paste / file drag-drop), the analyze + explain API
-  client (with demo fallback), result rendering for both workflows,
-  classification display + user reclassification, and the My Notes notebook.
+  client, result rendering for both workflows, classification display + user
+  reclassification, and the My Notes notebook.
+
+**No silent demo fallback.** Demo mode (canned local results) is **opt-in
+only** — it requires `DEMO_MODE: true` in `config.js` or a `?demo=1` query
+parameter. The deployed production build sets `DEMO_MODE: false`, so it never
+serves mock data; if the live API fails, the student sees a clear error.
+
+## Frontend hosting (S3 + CloudFront)
+
+```
+Browser ──HTTPS──> CloudFront distribution ──OAC(sigv4)──> private S3 bucket
+                        │                                    (courselens-web-*)
+                        └── redirect-to-https, index.html default root
+```
+
+- **S3 bucket** `courselens-web-<account>`: Block Public Access fully on,
+  SSE-S3, **not** a public website bucket, no public ACLs. Its bucket policy
+  grants `s3:GetObject` only to the CloudFront service principal, scoped by
+  `AWS:SourceArn` to this one distribution — so the bucket is reachable only
+  through CloudFront, never directly.
+- **CloudFront** with an **Origin Access Control** (OAC, sigv4) as the only
+  reader of the bucket; HTTPS enforced; `index.html` default root object;
+  AWS-managed CachingOptimized policy; `PriceClass_100` (cheapest region set).
+- Deployed with `--profile courselens` (least-privilege `courselens-deployer`).
 
 ### My Notes (client-only)
 

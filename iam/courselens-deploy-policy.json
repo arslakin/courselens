@@ -219,6 +219,46 @@
       "Resource": [
         "arn:aws:logs:us-east-1:387276719593:log-group:/aws/lambda/courselens-*"
       ]
+    },
+    {
+      "Sid": "S3CourseLensWebBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketTagging",
+        "s3:PutBucketWebsite",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::courselens-web-*",
+        "arn:aws:s3:::courselens-web-*/*"
+      ]
+    },
+    {
+      "Sid": "CloudFrontCourseLensDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:ListDistributions",
+        "cloudfront:TagResource",
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:ListOriginAccessControls",
+        "cloudfront:UpdateOriginAccessControl"
+      ],
+      "Resource": "*"
     }
   ]
 }

@@ -2,6 +2,8 @@
 
 **CourseLens turns course materials into an actionable learning plan.**
 
+**Live demo:** https://d3o9p9y1e35hxv.cloudfront.net
+
 CourseLens is an AI study assistant built for the AWS "Zero to Shipped"
 hackathon. A student uploads or pastes a course document; CourseLens identifies
 what kind of material it is and then applies the right strategy — explaining an
@@ -117,21 +119,41 @@ base URL (the `ApiBaseUrl` SAM output).
 
 ## AWS deployment
 
-Deployment uses **AWS SAM** and is intentionally deferred until the core is
-proven locally. The template is in `template.yaml`.
+CourseLens v1 is deployed and live.
 
+**Backend** (AWS SAM, `template.yaml`):
 ```bash
-# requires the AWS SAM CLI
-sam build
-sam deploy --guided        # first time; not yet run for CourseLens
+sam build --use-container
+sam deploy --stack-name courselens --profile courselens \
+  --s3-bucket courselens-sam-artifacts-<account> --s3-prefix courselens \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides ExecutionRolePermissionsBoundaryArn=<boundary-arn>
 ```
+Creates an API Gateway HTTP API + one Lambda (`courselens-api`) whose execution
+role carries a permissions boundary and only `bedrock:InvokeModel` on
+`amazon.nova-*`.
 
-Expected resources: an API Gateway HTTP API and one Lambda function
-(`courselens-api`) with a least-privilege `bedrock:InvokeModel` policy. The
-frontend is hosted as a static site (S3 + CloudFront) in a later step.
+**Frontend** (static site): private S3 bucket (`courselens-web-*`, Block Public
+Access on, SSE-S3) served through CloudFront via an Origin Access Control, so
+the bucket is never public. HTTPS enforced (`redirect-to-https`), `index.html`
+default root object.
 
-> **Status:** no AWS resources have been created by this project yet.
-> Deployment is pending explicit approval.
+All AWS work uses a dedicated, least-privilege deploy identity
+(`courselens-deployer` / `--profile courselens`), fully isolated from other
+projects. See [ARCHITECTURE.md](./ARCHITECTURE.md) and
+[PROJECT_STEPS.md](./PROJECT_STEPS.md).
+
+### Limitations (v1)
+
+- Supported inputs: pasted text, PDF, DOCX, TXT/Markdown (no PPTX, CSV, or
+  image/scanned OCR yet).
+- `assignment` and `lecture/reading` workflows; syllabus/rubric/dataset are
+  classified but analyzed with the study workflow.
+- API is public and unauthenticated (rate-limited via API Gateway throttling);
+  no accounts, no server-side history.
+- My Notes are stored only in your browser (localStorage) — clearing browser
+  data clears notes.
+- CORS is currently open (`*`); it can be tightened to the CloudFront domain.
 
 ## Cost-conscious design
 
@@ -150,18 +172,32 @@ frontend is hosted as a static site (S3 + CloudFront) in a later step.
 - **Server-side model control:** the client cannot select the model.
 - **Safe errors:** internal/AWS detail is never returned to clients.
 
+### AWS resources used
+
+| Resource | Purpose | Cost model |
+|---|---|---|
+| API Gateway HTTP API | `/analyze`, `/explain` | per-request (~$1/million) |
+| Lambda `courselens-api` | analysis logic | per-request + GB-s (free tier covers demo) |
+| Amazon Bedrock (Nova Lite) | the AI | per-token (see below) |
+| S3 `courselens-web-*` | static site origin (private) | storage pennies |
+| CloudFront distribution | HTTPS delivery | per-request/GB (free tier generous) |
+| S3 `courselens-sam-artifacts-*` | deploy artifacts | storage pennies |
+| CloudWatch Logs | Lambda logs | negligible at demo volume |
+
 ### Verified Nova Lite pricing (us-east-1, on-demand)
 
 From the AWS Price List API: **input $0.06 / 1M tokens**, **output $0.24 / 1M
-tokens**. One analysis is two model calls.
+tokens**. One analysis is two model calls (~1,100 tokens observed).
 
 | Scenario | Per analysis | 100 | 1,000 |
 |---|---|---|---|
-| Normal | ~$0.0003 | ~$0.03 | ~$0.33 |
+| Normal | ~$0.0003 | ~$0.03 | ~$0.30 |
 | Worst case | ~$0.0024 | ~$0.24 | ~$2.40 |
 
-A **$5–$10 AWS Budgets** cost alert is recommended as a safety net (the first
-two budgets are free). See [PROJECT_STEPS.md](./PROJECT_STEPS.md).
+**Very low usage** is effectively free (Lambda/API Gateway/CloudFront free
+tiers; a few cents of Bedrock). Everything is pay-per-use with **no always-on
+cost**. Main cost lever is Bedrock tokens, bounded by input truncation and API
+throttling. A **$5–$10 AWS Budgets** alert is recommended as a safety net.
 
 ## Hackathon information
 
