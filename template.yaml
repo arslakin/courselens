@@ -31,6 +31,15 @@ Parameters:
     Default: 10
     Description: >
       Maximum concurrent request burst before API Gateway returns HTTP 429.
+  ExecutionRolePermissionsBoundaryArn:
+    Type: String
+    Description: >
+      ARN of the permissions boundary applied to the CourseLens Lambda
+      execution role. This managed policy is created ONCE, out-of-band, by an
+      administrator (NOT by courselens-deployer) and caps what the execution
+      role can ever do (Logs + Bedrock InvokeModel on Nova). It is the control
+      that prevents the deployer from granting the Lambda arbitrary account
+      permissions. See iam/README.md and iam/courselens-execution-boundary.json.
 
 Globals:
   Function:
@@ -66,6 +75,61 @@ Resources:
         ThrottlingRateLimit: !Ref ThrottleRateLimit
         ThrottlingBurstLimit: !Ref ThrottleBurstLimit
 
+  # Explicit, CourseLens-named runtime permissions for the Lambda, defined as a
+  # standalone *customer-managed* policy (not an inline role policy). Using a
+  # managed policy means the deployer never needs iam:PutRolePolicy: the role is
+  # created and this policy is attached via iam:AttachRolePolicy, which the
+  # deploy policy locks down by exact policy ARN. The document is fixed here in
+  # source, so the deployer cannot author arbitrary runtime permissions.
+  CourseLensExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: courselens-api-execution-policy
+      Description: >
+        Runtime permissions for the CourseLens Lambda: CloudWatch Logs and
+        Bedrock InvokeModel for the configured Amazon Nova model only.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Logs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/courselens-*
+          - Sid: InvokeBedrockNovaModelsOnly
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource:
+              - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-*
+
+  # Explicit, CourseLens-named execution role. Its permissions come solely from
+  # the managed policy above (attached by ARN). No inline policies are used, so
+  # the deployer needs no iam:PutRolePolicy / iam:DeleteRolePolicy.
+  #
+  # PermissionsBoundary is the hard cap: even if the attached policy were later
+  # widened, the role's *effective* permissions can never exceed the boundary
+  # (Logs + Bedrock InvokeModel on Nova). The deploy policy additionally forces
+  # any role the deployer creates to carry exactly this boundary, so the
+  # deployer cannot create an unbounded execution role.
+  CourseLensExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: courselens-api-execution-role
+      PermissionsBoundary: !Ref ExecutionRolePermissionsBoundaryArn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref CourseLensExecutionPolicy
+
   CourseLensFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -73,21 +137,14 @@ Resources:
       Description: CourseLens API handler (analyze + explain).
       CodeUri: src/
       Handler: courselens.api.handler
+      # Use the explicit role above; do NOT let SAM generate an implicit role
+      # with an inline policy (which is what previously forced the deployer to
+      # hold iam:PutRolePolicy).
+      Role: !GetAtt CourseLensExecutionRole.Arn
       Environment:
         Variables:
           COURSELENS_MODEL_ID: !Ref BedrockModelId
           COURSELENS_AWS_REGION: !Ref BedrockRegion
-      Policies:
-        # Least-privilege: allow only Bedrock model invocation, scoped to the
-        # Amazon Nova model family in the configured region/account. No other
-        # AWS permissions are granted.
-        - Statement:
-            - Sid: InvokeBedrockNovaModels
-              Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource:
-                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-*
       Events:
         Analyze:
           Type: HttpApi
