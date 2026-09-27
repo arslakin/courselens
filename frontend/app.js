@@ -1,4 +1,4 @@
-/* CourseLens frontend logic.
+/* RojLearn frontend logic.
  *
  * Plain vanilla JS, no build step. Talks to the /analyze and /explain API
  * endpoints.
@@ -48,7 +48,7 @@
       // Production must have a real API. If it's missing, fail loud — never
       // silently serve mock data.
       setStatus(
-        "Configuration error: the CourseLens API is not configured. Please try again later.",
+        "Configuration error: the RojLearn API is not configured. Please try again later.",
         "error"
       );
       if (el["analyze-btn"]) el["analyze-btn"].disabled = true;
@@ -147,7 +147,7 @@
 
   function run(fn) {
     el["analyze-btn"].disabled = true;
-    setStatus("Analyzing with CourseLens...", "working");
+    setStatus("Analyzing with RojLearn...", "working");
     fn()
       .then(function (result) {
         setStatus("", "");
@@ -466,10 +466,10 @@
     });
 
     el["notes-md"].addEventListener("click", function () {
-      download("courselens-notes.md", "# CourseLens Notes\n\n" + el["notes-area"].value);
+      download("rojlearn-notes.md", "# RojLearn Notes\n\n" + el["notes-area"].value);
     });
     el["notes-txt"].addEventListener("click", function () {
-      download("courselens-notes.txt", el["notes-area"].value);
+      download("rojlearn-notes.txt", el["notes-area"].value);
     });
     el["notes-clear"].addEventListener("click", function () {
       if (!el["notes-area"].value || confirm("Clear all notes? This cannot be undone.")) {

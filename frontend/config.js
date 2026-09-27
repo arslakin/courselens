@@ -1,4 +1,5 @@
-// CourseLens frontend configuration.
+// RojLearn frontend configuration.
+// (COURSELENS_CONFIG global key is retained as an internal/legacy identifier.)
 //
 // API_BASE_URL: the deployed API Gateway base URL (the ApiBaseUrl stack
 //   output). This is the production default and is baked into the deployed

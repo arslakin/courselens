@@ -1,11 +1,17 @@
-# CourseLens
+# RojLearn
 
-**CourseLens turns course materials into an actionable learning plan.**
+**RojLearn turns course materials into actionable learning plans.**
 
 **Live demo:** https://d3o9p9y1e35hxv.cloudfront.net
 
-CourseLens is an AI study assistant built for the AWS "Zero to Shipped"
-hackathon. A student uploads or pastes a course document; CourseLens identifies
+> **Naming note:** the product is **RojLearn**. The underlying AWS
+> infrastructure and code retain the original internal prefix `courselens-*`
+> (Lambda, S3 buckets, IAM roles/policies, CloudFormation stack, the Python
+> package, and `COURSELENS_*` env vars). These are legacy internal identifiers,
+> intentionally left unchanged to avoid recreating working infrastructure.
+
+RojLearn is an AI study assistant built for the AWS "Zero to Shipped"
+hackathon. A student uploads or pastes a course document; RojLearn identifies
 what kind of material it is and then applies the right strategy — explaining an
 assignment and building a step-by-step action plan, or summarizing lecture
 notes/readings and generating a study quiz.
@@ -17,7 +23,7 @@ them.**
 
 Students are handed dense assignments, lecture notes, and readings with little
 guidance on *how* to approach them. Assignments in particular bury requirements,
-deliverables, deadlines, and constraints in prose. CourseLens reads the material
+deliverables, deadlines, and constraints in prose. RojLearn reads the material
 and turns it into something actionable — an explanation, a plan, and the
 concepts to learn — without producing submittable answers.
 
@@ -32,7 +38,7 @@ concepts to learn — without producing submittable answers.
   explanations of difficult concepts, and a 5-question study quiz.
 - **Explain further:** drill into any single step or concept on demand.
 - **My Notes:** a personal notebook that saves in your browser (localStorage).
-  Add any CourseLens result to your notes with one click, edit freely, then
+  Add any RojLearn result to your notes with one click, edit freely, then
   Copy All or download as `.md` / `.txt`. No account, no cloud storage.
 - **Input safeguards:** oversized inputs are capped; scanned/image-only
   documents are detected and reported instead of failing silently.
@@ -54,7 +60,7 @@ stateless — no database.
 ## How it works
 
 1. **Upload / paste** a course document.
-2. **Understand:** CourseLens extracts the text and classifies the document type.
+2. **Understand:** RojLearn extracts the text and classifies the document type.
 3. **Explain:** it explains the material in plain language.
 4. **Plan:** for assignments, it builds a step-by-step action plan and lists the
    concepts to learn.
@@ -119,7 +125,7 @@ base URL (the `ApiBaseUrl` SAM output).
 
 ## AWS deployment
 
-CourseLens v1 is deployed and live.
+RojLearn v1 is deployed and live.
 
 **Backend** (AWS SAM, `template.yaml`):
 ```bash
@@ -205,5 +211,5 @@ Built for the **AWS "Zero to Shipped"** hackathon. Region: **us-east-1**. Model:
 **Amazon Nova Lite** via the Bedrock **Converse** API. Infrastructure: **AWS
 SAM**. Development is logged in [PROJECT_STEPS.md](./PROJECT_STEPS.md).
 
-CourseLens is a standalone project and is kept fully separate from any other
-work; all its AWS resources are prefixed with `courselens`.
+RojLearn is a standalone project and is kept fully separate from any other
+work; all its AWS resources use the internal prefix `courselens`.

@@ -1,7 +1,13 @@
-# CourseLens Build Log
+# RojLearn Build Log
 
-A running log of the CourseLens hackathon build: major steps, decisions, tests,
+A running log of the RojLearn hackathon build: major steps, decisions, tests,
 Kiro's role, AWS integration, Bedrock tests, deployment, and milestones.
+
+> **Naming note:** the product was originally built under the name
+> **CourseLens** and later rebranded to **RojLearn** (user-facing only). The
+> historical entries below intentionally keep the original name and the
+> `courselens-*` AWS resource identifiers for accuracy — those internal
+> infrastructure names were not changed during the rebrand.
 
 ---
 
@@ -397,3 +403,30 @@ persisted by the frontend; notes stay in browser localStorage; no analytics or
 third-party scripts.
 
 **Milestone:** CourseLens v1 is complete and publicly usable.
+
+---
+
+## Phase 8 — Rebrand to RojLearn (user-facing only)
+
+Goal: rename the public product from CourseLens to **RojLearn** without
+rebuilding or replacing any working AWS infrastructure.
+
+- **Tagline:** "Turn course materials into actionable learning plans."
+- **Frontend:** updated page title, logo/heading, tagline, accessibility label,
+  the classification dropdown, footer text, user-visible status messages, and
+  the downloaded notes filename/heading (`rojlearn-notes.md`/`.txt`).
+- **Docs:** README/ARCHITECTURE/this log now use "RojLearn" for the product,
+  with an explicit note that `courselens-*` are legacy internal names.
+- **Kept unchanged (intentionally):** the CloudFormation stack `courselens`,
+  Lambda `courselens-api`, S3 buckets `courselens-web-*` / `courselens-sam-*`,
+  IAM roles/policies/boundary, the CloudFront distribution and API Gateway, the
+  Python package `src/courselens/`, `COURSELENS_*` env vars, the
+  `window.COURSELENS_CONFIG` frontend config key, and the
+  `courselens.notes.v1` localStorage key (renaming it would orphan users'
+  saved notes). No AWS resources were recreated.
+- **Deployment:** only the changed static files were re-uploaded to the
+  existing `courselens-web-*` bucket and the existing CloudFront distribution
+  was invalidated — no new infrastructure.
+
+**Milestone:** the live site at the existing CloudFront URL now shows RojLearn
+branding while continuing to use the same backend and Bedrock path.

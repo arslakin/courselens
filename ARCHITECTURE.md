@@ -1,8 +1,14 @@
-# CourseLens Architecture
+# RojLearn Architecture
 
-CourseLens turns course materials into an actionable learning plan. This
+RojLearn turns course materials into actionable learning plans. This
 document describes the minimal, serverless architecture chosen for the AWS
 "Zero to Shipped" hackathon MVP and the reasoning behind each choice.
+
+> **Naming note:** the product is **RojLearn**. All AWS resource identifiers,
+> the Python package (`src/courselens/`), and `COURSELENS_*` environment
+> variables retain the original `courselens-*` prefix. These are legacy
+> internal infrastructure names, kept unchanged so working resources are not
+> recreated; only user-facing branding is "RojLearn".
 
 ## Design principles
 
@@ -13,7 +19,7 @@ document describes the minimal, serverless architecture chosen for the AWS
 3. **Guide, don't do the work.** The product helps students understand and plan
    their work; it never produces submittable answers. This is enforced in the
    prompt layer (`prompts.GUARDRAIL_SYSTEM`).
-4. **Isolated.** CourseLens is fully separate from other projects. All AWS
+4. **Isolated.** RojLearn is fully separate from other projects. All AWS
    resources are/will be named with a `courselens` prefix, and no existing
    resources are modified.
 
@@ -161,7 +167,7 @@ Browser ──HTTPS──> CloudFront distribution ──OAC(sigv4)──> priva
 
 A lightweight student notebook that lives **entirely in the browser** via
 `localStorage` (key `courselens.notes.v1`). Students can type/edit notes and
-click "Add to Notes" beside any CourseLens result (summary, key concept,
+click "Add to Notes" beside any RojLearn result (summary, key concept,
 explanation, requirement, action-plan step, quiz Q&A). Actions: Copy All,
 Clear, Download `.md`, Download `.txt`.
 
