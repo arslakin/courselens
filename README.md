@@ -29,6 +29,9 @@ concepts to learn — without producing submittable answers.
 - **Lecture / reading workflow:** concise summary, key concepts, plain-language
   explanations of difficult concepts, and a 5-question study quiz.
 - **Explain further:** drill into any single step or concept on demand.
+- **My Notes:** a personal notebook that saves in your browser (localStorage).
+  Add any CourseLens result to your notes with one click, edit freely, then
+  Copy All or download as `.md` / `.txt`. No account, no cloud storage.
 - **Input safeguards:** oversized inputs are capped; scanned/image-only
   documents are detected and reported instead of failing silently.
 - **Anti-cheating guardrail:** the assistant helps you understand and plan; it
@@ -63,9 +66,21 @@ MVP: **pasted text, PDF, DOCX, TXT, and Markdown.**
 Detected but not yet supported (planned post-hackathon): PPTX, CSV/spreadsheets,
 and images/screenshots (OCR). Scanned/image-only PDFs are detected and reported.
 
+## API
+
+The backend is a single Lambda behind an API Gateway HTTP API:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/analyze` | Analyze pasted text or an uploaded file |
+| POST | `/explain` | Explain a single step/concept further |
+
+Errors use a consistent envelope: `{"error": {"code": "...", "message": "..."}}`.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for request/response shapes.
+
 ## Local setup
 
-Requires Python 3.11+.
+Requires Python 3.11+ (developed on 3.14).
 
 ```bash
 # from the repo root
@@ -78,18 +93,45 @@ pytest
 ```
 
 The backend logic lives in `src/courselens/`. The core entry points are in
-`pipeline.py` (`analyze_text`, `analyze_file`, `explain_further`).
+`pipeline.py` (`analyze_text`, `analyze_file`, `explain_further`); the Lambda
+handler is `courselens.api.handler`.
 
 To run against real Bedrock locally you need AWS credentials with Bedrock access
 in `us-east-1`; the model defaults to `amazon.nova-lite-v1:0` and can be
 overridden with the `COURSELENS_MODEL_ID` environment variable.
 
+### Run the frontend locally
+
+The frontend is static — no build step.
+
+```bash
+cd frontend
+python3 -m http.server 8123
+# open http://127.0.0.1:8123
+```
+
+With `API_BASE_URL` empty in `frontend/config.js`, the app runs in **demo
+mode** and returns sample results, so you can exercise the full UI and My Notes
+without a backend. To use the real API, set `API_BASE_URL` to the deployed API
+base URL (the `ApiBaseUrl` SAM output).
+
 ## AWS deployment
 
-Deployment uses AWS SAM and is intentionally deferred until the core is proven
-locally. Deployment steps will be documented here once the backend is wrapped in
-Lambda + API Gateway and the frontend is added. **No AWS resources are created
-by the current codebase.**
+Deployment uses **AWS SAM** and is intentionally deferred until the core is
+proven locally. The template is in `template.yaml`.
+
+```bash
+# requires the AWS SAM CLI
+sam build
+sam deploy --guided        # first time; not yet run for CourseLens
+```
+
+Expected resources: an API Gateway HTTP API and one Lambda function
+(`courselens-api`) with a least-privilege `bedrock:InvokeModel` policy. The
+frontend is hosted as a static site (S3 + CloudFront) in a later step.
+
+> **Status:** no AWS resources have been created by this project yet.
+> Deployment is pending explicit approval.
 
 ## Cost-conscious design
 

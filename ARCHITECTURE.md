@@ -77,6 +77,69 @@ is no database; each request is analyzed and returned without being stored.
 | `analyzer.py` | Core AI loop: classify, analyze (assignment vs lecture/reading), explain; retry + normalization |
 | `extraction.py` | Text extraction for pasted text / TXT / MD / PDF / DOCX; size cap + scanned-doc detection |
 | `pipeline.py` | High-level `analyze_text` / `analyze_file` / `explain_further` entry points |
+| `api.py` | AWS Lambda handler: HTTP API adapter over the pipeline (validation, JSON errors, CORS) |
+
+## API layer
+
+The Lambda handler (`courselens.api.handler`) is a thin adapter over the
+pipeline — no analysis logic is duplicated. It targets the API Gateway **HTTP
+API v2** event/response format.
+
+Routes:
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/analyze` | `{inputType:"text"\|"file", text?, fileName?, fileContentBase64?, overrideType?}` | assignment or lecture/reading result + `input` metadata |
+| POST | `/explain` | `{context, target}` | `{explanation}` |
+| OPTIONS | * | — | CORS preflight (204) |
+
+Behavior:
+- **Request validation** with clear 400s for missing/mistyped fields.
+- **Consistent JSON error envelope:** `{"error": {"code": "...", "message": "..."}}`.
+- **Status mapping:** input problems (empty, unsupported type, scanned doc) →
+  422; upstream model/parse failures → 502; unknown route → 404; bad method →
+  405; oversized body → 413; everything else → 500.
+- **CORS:** permissive (`*`) during development so the static frontend can call
+  the API; intended to be tightened to the CloudFront domain post-hackathon.
+- **Base64 bodies** are supported (API Gateway may deliver binary/base64 bodies).
+
+## SAM template (`template.yaml`)
+
+- `AWS::Serverless::HttpApi` — `courselens-http-api`, with CORS config.
+- `AWS::Serverless::Function` — `courselens-api`:
+  - Runtime **python3.12**, **arm64** (Graviton — cheaper per-ms).
+  - **512 MB** memory, **30 s** timeout (work is I/O-bound on Bedrock; small
+    footprint keeps cost low while leaving margin for PDF/DOCX parsing).
+  - Env vars `COURSELENS_MODEL_ID` and `COURSELENS_AWS_REGION`.
+  - **Least-privilege IAM:** only `bedrock:InvokeModel`, scoped to
+    `arn:aws:bedrock:<region>::foundation-model/amazon.nova-*`. No other
+    permissions.
+- `CodeUri: src/` with `src/requirements.txt` (pypdf, python-docx; boto3 is
+  provided by the Lambda runtime).
+
+## Frontend (`frontend/`)
+
+Static site (plain HTML/CSS/JS, no build step) intended for S3 + CloudFront.
+
+- `index.html` — single-page layout following Upload → Understand → Explain →
+  Plan → Study → Take Notes.
+- `styles.css` — styling, responsive two-column layout (results + notes).
+- `config.js` — holds `API_BASE_URL`. When empty, the app runs in **demo
+  mode** with canned results so the UI works with no backend.
+- `app.js` — input handling (paste / file drag-drop), the analyze + explain API
+  client (with demo fallback), result rendering for both workflows,
+  classification display + user reclassification, and the My Notes notebook.
+
+### My Notes (client-only)
+
+A lightweight student notebook that lives **entirely in the browser** via
+`localStorage` (key `courselens.notes.v1`). Students can type/edit notes and
+click "Add to Notes" beside any CourseLens result (summary, key concept,
+explanation, requirement, action-plan step, quiz Q&A). Actions: Copy All,
+Clear, Download `.md`, Download `.txt`.
+
+**No AWS infrastructure** backs My Notes — no DynamoDB, no accounts, no cloud
+sync, no backend storage. It adds zero infrastructure cost.
 
 ## Data model (stateless API contract)
 

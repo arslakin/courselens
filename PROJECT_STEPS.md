@@ -92,3 +92,84 @@ resources have been created; the code runs and is tested entirely locally.
 **Next step:** wrap the pipeline in an AWS Lambda handler + API Gateway (routes
 `/analyze`, `/explain`) with a SAM template, tested locally with `sam local`.
 Per project rules, we STOP and report before the first AWS deployment.
+
+---
+
+## Phase 3 — API layer (AWS Lambda + API Gateway via SAM)
+
+Goal: expose the pipeline over HTTP, defined in SAM, tested locally. No deploy.
+
+**Lambda handler (`api.py`).**
+- `courselens.api.handler` targets the API Gateway HTTP API v2 event format.
+- Routes: `POST /analyze`, `POST /explain`, and `OPTIONS` preflight.
+- Thin adapter over the pipeline — no analysis logic duplicated.
+- Request validation with clear 400s; consistent error envelope
+  `{"error": {"code","message"}}`.
+- Status mapping: input problems → 422, model/parse failures → 502,
+  unknown route → 404, bad method → 405, oversized body → 413, else 500.
+- CORS enabled (permissive during development); base64 request bodies handled.
+
+**SAM template (`template.yaml`).**
+- `courselens-http-api` (HTTP API) + `courselens-api` Lambda.
+- python3.12 on arm64 (Graviton), 512 MB, 30 s timeout — cost-conscious sizing
+  for I/O-bound Bedrock calls.
+- Env vars `COURSELENS_MODEL_ID`, `COURSELENS_AWS_REGION`.
+- Least-privilege IAM: only `bedrock:InvokeModel`, scoped to
+  `amazon.nova-*` in the configured region.
+- `src/requirements.txt` for packaging (boto3 comes from the runtime).
+
+**Tests.** Added 19 API tests (routing, validation, CORS, base64 body, and
+error-to-status mapping) with the pipeline mocked. Total suite now green.
+
+**Local verification.** The SAM CLI is not installed in this environment
+(Docker is), so `sam local` / `sam validate` could not be run here. The
+template was structurally validated by parsing it and asserting on its
+resources, and the handler is fully covered by unit tests. Running `sam local`
+is recommended on a machine with the SAM CLI before deployment.
+
+---
+
+## Phase 4 — Minimal frontend + My Notes
+
+Goal: a clean, minimal static UI following Upload → Understand → Explain →
+Plan → Study → Take Notes.
+
+**Frontend (`frontend/`, no build step).**
+- `index.html`, `styles.css`, `config.js`, `app.js`.
+- Input: paste text or upload (PDF/DOCX/TXT/MD) with drag-and-drop.
+- Analyze button; classification card shows the detected type with a
+  reclassify + re-analyze control (user can correct the type).
+- Assignment rendering: explanation, requirements, deliverables, deadlines,
+  constraints, action plan, concepts.
+- Lecture/reading rendering: summary, key concepts, difficult concepts, quiz.
+- "Explain further" on steps and concepts, calling `/explain`.
+- `config.js` `API_BASE_URL`: empty ⇒ demo mode (canned results) so the UI runs
+  with no backend; set it to the deployed API to use Bedrock.
+
+**My Notes (client-only, localStorage).**
+- Editable notebook persisted to `localStorage` (`courselens.notes.v1`).
+- "Add to Notes" beside every result piece (summary, key concepts,
+  explanations, requirements, individual action-plan steps, quiz Q&A).
+- Copy All, Clear (confirmed), Download `.md`, Download `.txt`.
+- No DynamoDB, Cognito, accounts, cloud sync, or backend storage — zero added
+  AWS cost.
+
+**Local verification.** JS syntax-checked with `node --check`; the site was
+served with `python3 -m http.server` and all assets returned HTTP 200; demo
+classification routing verified.
+
+**Cost control.** No DynamoDB, Cognito, Textract, Bedrock Agents, Step
+Functions, RDS, EC2, ECS, OpenSearch, or SageMaker introduced. Architecture
+remains serverless and minimal.
+
+**Kiro's role.** Kiro implemented the API handler, SAM template, the full
+static frontend and the My Notes notebook, wrote and ran the tests, and served
+the app locally to verify it — all without creating any AWS resources.
+
+**Milestone:** end-to-end local application (API layer + frontend + notes)
+complete and tested locally.
+
+**Next step:** deploy with AWS SAM (`sam build` / `sam deploy`) to create the
+HTTP API + Lambda, then host the frontend on S3 + CloudFront. **Deployment is
+paused pending explicit approval** — no `sam deploy` has been run and no AWS
+resources have been created.
