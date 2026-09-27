@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets — never commit credentials
+.env
+.env.*
+*.pem
+*.key
+aws-credentials*
+credentials
+
+# AWS SAM build artifacts
+.aws-sam/
+samconfig.toml.bak
+packaged.yaml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Local scratch / test fixtures that are large or generated
+tmp/
+scratch/
