@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CourseLens — turn course materials into an actionable learning plan</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1 class="logo">CourseLens</h1>
+      <p class="tagline">Turn course materials into an actionable learning plan.</p>
+      <ol class="journey" aria-label="How CourseLens works">
+        <li>Upload</li>
+        <li>Understand</li>
+        <li>Explain</li>
+        <li>Plan</li>
+        <li>Study</li>
+        <li>Take Notes</li>
+      </ol>
+    </div>
+  </header>
+
+  <main class="wrap layout">
+    <!-- LEFT: input + results -->
+    <section class="col-main">
+      <!-- Upload -->
+      <section class="card" aria-labelledby="upload-h">
+        <h2 id="upload-h">1 · Upload</h2>
+        <p class="muted">Paste text or upload a PDF, DOCX, TXT, or Markdown file.</p>
+
+        <div class="input-modes" role="tablist">
+          <button id="tab-paste" class="tab active" role="tab" aria-selected="true">Paste text</button>
+          <button id="tab-file" class="tab" role="tab" aria-selected="false">Upload file</button>
+        </div>
+
+        <div id="panel-paste" class="input-panel">
+          <label class="sr-only" for="paste-input">Paste your course material</label>
+          <textarea id="paste-input" rows="10"
+            placeholder="Paste an assignment, lecture notes, or a reading here..."></textarea>
+        </div>
+
+        <div id="panel-file" class="input-panel hidden">
+          <label id="drop-zone" class="drop-zone" for="file-input">
+            <input id="file-input" type="file"
+              accept=".pdf,.docx,.txt,.md,.markdown,.text" class="sr-only" />
+            <span id="drop-label">Drop a file here or click to choose</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>If you already know the type (optional)</span>
+            <select id="override-type">
+              <option value="">Let CourseLens decide</option>
+              <option value="assignment">Assignment</option>
+              <option value="lecture_notes">Lecture notes</option>
+              <option value="reading">Reading</option>
+              <option value="syllabus">Syllabus</option>
+              <option value="rubric">Rubric</option>
+              <option value="dataset">Dataset</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <button id="analyze-btn" class="primary">Analyze</button>
+        </div>
+
+        <p id="input-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <!-- Understand: classification -->
+      <section id="classification-card" class="card hidden" aria-labelledby="understand-h">
+        <h2 id="understand-h">2 · Understand</h2>
+        <p>This looks like:
+          <strong id="doc-type-label">—</strong>
+          <span id="doc-confidence" class="muted"></span>
+        </p>
+        <div class="row">
+          <label class="field">
+            <span>Not right? Reclassify and re-analyze:</span>
+            <select id="reclassify">
+              <option value="assignment">Assignment</option>
+              <option value="lecture_notes">Lecture notes</option>
+              <option value="reading">Reading</option>
+              <option value="syllabus">Syllabus</option>
+              <option value="rubric">Rubric</option>
+              <option value="dataset">Dataset</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <button id="reclassify-btn" class="secondary">Re-analyze</button>
+        </div>
+        <p id="truncation-note" class="muted hidden"></p>
+      </section>
+
+      <!-- Results render here -->
+      <div id="results"></div>
+    </section>
+
+    <!-- RIGHT: My Notes -->
+    <aside class="col-notes">
+      <section class="card notes-card" aria-labelledby="notes-h">
+        <div class="notes-head">
+          <h2 id="notes-h">My Notes</h2>
+          <span id="notes-saved" class="muted" aria-live="polite">Saved locally</span>
+        </div>
+        <p class="muted small">Your notebook. Stored only in this browser (localStorage).</p>
+        <label class="sr-only" for="notes-area">Your notes</label>
+        <textarea id="notes-area" rows="16"
+          placeholder="Type your own notes here, or click 'Add to Notes' beside any result."></textarea>
+        <div class="notes-actions">
+          <button id="notes-copy" class="secondary">Copy All</button>
+          <button id="notes-md" class="secondary">Download .md</button>
+          <button id="notes-txt" class="secondary">Download .txt</button>
+          <button id="notes-clear" class="danger">Clear</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="site-footer wrap">
+    <p class="muted small">
+      CourseLens guides your learning — it won't do graded work for you.
+      Built for the AWS "Zero to Shipped" hackathon.
+    </p>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
