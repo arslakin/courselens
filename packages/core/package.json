@@ -1,0 +1,15 @@
+{
+  "name": "@rojanda/core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@rojanda/types": "*",
+    "@rojanda/api": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "jest"
+  }
+}
