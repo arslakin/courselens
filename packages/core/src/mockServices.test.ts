@@ -67,17 +67,28 @@ describe("NotesService", () => {
   });
 });
 
-describe("ChatService grounding", () => {
+describe("ChatService grounding (real, from the lesson's own sources)", () => {
   it("answers from sources, returns not_found otherwise, and never mixes external", async () => {
     const s = createMockServices();
-    const grounded = await s.chat.ask("lesson1", "Fotosentez nedir?", "sources");
-    expect(grounded.provenance).toBe("grounded");
+    const user = await s.auth.signIn("a@x.co");
+    const course = await s.courses.create(user.id, "Biyoloji");
+    const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
+    // Real grounding material: attach a source with actual text to this lesson.
+    await s.sources.add(lesson.id, user.id, "txt", {
+      extractedText:
+        "Fotosentez, bitkilerin ışık enerjisini kullanarak kloroplastta glikoz üretmesidir.",
+    });
 
-    const missing = await s.chat.ask("lesson1", "Osmanlı padişahları kimlerdir?", "sources");
+    const grounded = await s.chat.ask(lesson.id, "Fotosentez nedir?", "sources");
+    expect(grounded.provenance).toBe("grounded");
+    expect(grounded.message.text).toContain("Kaynaklarından");
+
+    // A question with no support in the lesson's material -> not_found.
+    const missing = await s.chat.ask(lesson.id, "Osmanlı padişahları kimlerdir?", "sources");
     expect(missing.provenance).toBe("not_found");
     expect(missing.message.text).toContain("kaynaklarında yer almıyor");
 
-    const external = await s.chat.ask("lesson1", "herhangi bir soru", "external");
+    const external = await s.chat.ask(lesson.id, "herhangi bir soru", "external");
     expect(external.provenance).toBe("external");
   });
 });
@@ -247,5 +258,127 @@ describe("profile", () => {
     expect(p1.preferences.quizLength).toBe(20);
     // Untouched prefs preserved.
     expect(p1.preferences.podcastLength).toBe("short");
+  });
+});
+
+
+describe("LocalAnalysisBackend — real grounded analysis", () => {
+  const { LocalAnalysisBackend } = require("./localAnalysis");
+
+  it("derives a summary grounded in the actual source text", async () => {
+    const b = new LocalAnalysisBackend();
+    const src =
+      "Newton'ın birinci yasası eylemsizlik yasasıdır. İkinci yasa F eşittir m çarpı a. Üçüncü yasa etki tepki yasasıdır.";
+    const study = await b.analyze(src, { language: "tr", quizLength: 10 });
+    // Summary must be built from the source's own words (grounded).
+    expect(study.summary).toContain("eylemsizlik");
+    expect(study.concepts.length).toBeGreaterThan(0);
+    expect(study.flashcards.length).toBeGreaterThan(0);
+  });
+
+  it("honors the requested quiz length (10 and 20)", async () => {
+    const b = new LocalAnalysisBackend();
+    const src = "Ortalama, medyan ve standart sapma temel istatistik kavramlarıdır. Varyans yayılımı ölçer.";
+    const q10 = await b.analyze(src, { language: "tr", quizLength: 10 });
+    const q20 = await b.analyze(src, { language: "tr", quizLength: 20 });
+    expect(q10.quiz.questions.length).toBe(10);
+    expect(q20.quiz.questions.length).toBe(20);
+    // Every question is 4-option with a valid correct index.
+    for (const question of q20.quiz.questions) {
+      expect(question.options.length).toBe(4);
+      expect(question.correctIndex).toBeGreaterThanOrEqual(0);
+      expect(question.correctIndex).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("returns a labeled placeholder for image/audio (no fabrication)", async () => {
+    const b = new LocalAnalysisBackend();
+    const img = await b.extract("image", { uri: "file://x.jpg" });
+    expect(img.placeholder).toBe(true);
+    expect(img.text).toContain("OCR");
+    // Text input extracts for real.
+    const txt = await b.extract("txt", { text: "gerçek metin" });
+    expect(txt.placeholder).toBe(false);
+    expect(txt.text).toBe("gerçek metin");
+  });
+
+  it("ask() is grounded: answers only from provided context", async () => {
+    const b = new LocalAnalysisBackend();
+    const ctx = { sources: ["Işık hızı saniyede yaklaşık 300 bin kilometredir."] };
+    const hit = await b.ask(ctx, "Işık hızı nedir?", "sources");
+    expect(hit.provenance).toBe("grounded");
+    const miss = await b.ask(ctx, "Fransa'nın başkenti neresi?", "sources");
+    expect(miss.provenance).toBe("not_found");
+  });
+});
+
+describe("processSourceToLesson — source → grounded lesson", () => {
+  const { LocalAnalysisBackend } = require("./localAnalysis");
+  const { processSourceToLesson } = require("./sourcePipeline");
+
+  it("creates a ready lesson, preserves the source, and grounds the study set in the source text (txt)", async () => {
+    const s = createMockServices(new MemoryStore(), new LocalAnalysisBackend());
+    const user = await s.auth.signIn("ogrenci@example.com");
+    const course = await s.courses.create(user.id, "Fizik");
+
+    const src =
+      "Newton'ın birinci yasası eylemsizlik yasasıdır. İkinci yasa kuvvetin kütle çarpı ivmeye eşit olduğunu söyler. Üçüncü yasa her etkiye eşit ve zıt bir tepki olduğunu belirtir.";
+
+    const { lesson, study, extractedPlaceholder } = await processSourceToLesson(
+      s,
+      new LocalAnalysisBackend(),
+      { userId: user.id, courseId: course.id, title: "Newton Yasaları", kind: "txt", text: src }
+    );
+
+    // Real text → no placeholder.
+    expect(extractedPlaceholder).toBe(false);
+    expect(lesson.status).toBe("ready");
+    expect(lesson.study).toBeTruthy();
+
+    // Source preserved, associated with this user + lesson.
+    const sources = await s.sources.listByLesson(lesson.id);
+    expect(sources.length).toBe(1);
+    expect(sources[0].userId).toBe(user.id);
+    expect(sources[0].extractedText).toContain("Newton");
+
+    // Grounded: a salient term from the source appears in the study output.
+    const blob = JSON.stringify(study).toLowerCase();
+    expect(blob).toContain("yasa");
+  });
+
+  it("flags a placeholder for an image source but still preserves it under the user's course", async () => {
+    const s = createMockServices(new MemoryStore(), new LocalAnalysisBackend());
+    const user = await s.auth.signIn("ogrenci@example.com");
+    const course = await s.courses.create(user.id, "Tarih");
+
+    const { lesson, extractedPlaceholder } = await processSourceToLesson(
+      s,
+      new LocalAnalysisBackend(),
+      { userId: user.id, courseId: course.id, title: "Fotoğraf", kind: "photo", uri: "file://note.jpg", mime: "image/jpeg" }
+    );
+
+    expect(extractedPlaceholder).toBe(true);
+    const sources = await s.sources.listByLesson(lesson.id);
+    expect(sources.length).toBe(1);
+    expect(sources[0].kind).toBe("photo");
+    expect(sources[0].uri).toBe("file://note.jpg");
+  });
+
+  it("does not leak a lesson created for one user into another user's course list", async () => {
+    const store = new MemoryStore();
+    const s = createMockServices(store, new LocalAnalysisBackend());
+    const a = await s.auth.signIn("a@example.com");
+    const courseA = await s.courses.create(a.id, "A dersi");
+    const { lesson } = await processSourceToLesson(s, new LocalAnalysisBackend(), {
+      userId: a.id,
+      courseId: courseA.id,
+      title: "A materyali",
+      kind: "txt",
+      text: "Bu A kullanıcısına ait özel bir ders materyalidir.",
+    });
+
+    const b = await s.auth.signIn("b@example.com");
+    expect((await s.lessons.listRecent(b.id)).find((l: any) => l.id === lesson.id)).toBeUndefined();
+    expect((await s.courses.list(b.id)).length).toBe(0);
   });
 });

@@ -49,6 +49,52 @@ export interface ProgressService {
   summary(userId: Id): Promise<ProgressSummary>;
 }
 
+// --- Real-data analysis backend -------------------------------------------
+
+export type SourceInputKind = "image" | "pdf" | "doc" | "txt" | "audio";
+
+export interface ExtractResult {
+  /** Plain text extracted from the source (OCR/parse/transcript). */
+  text: string;
+  /** True when extraction is a local placeholder (e.g. OCR unavailable in Go). */
+  placeholder: boolean;
+}
+
+export interface AnalyzeOptions {
+  language: "tr" | "en";
+  quizLength: 10 | 20;
+}
+
+export interface AskContext {
+  sources: string[]; // extracted text of the student's own materials
+  transcript?: string;
+  notes?: string[];
+}
+
+export type AskProvenance = "grounded" | "not_found" | "external";
+
+export interface AskResult {
+  answer: string;
+  provenance: AskProvenance;
+}
+
+/**
+ * AnalysisBackend — the single boundary for every AI step. The mobile client
+ * depends only on this; a LocalAnalysisBackend runs it offline for dev/testing,
+ * and a RemoteAnalysisBackend calls the RojAnda backend once deployed. All
+ * analysis is grounded in the student's own provided text.
+ */
+export interface AnalysisBackend {
+  /** Extract text from a captured source (OCR / document parse / transcript). */
+  extract(kind: SourceInputKind, input: { uri?: string; text?: string }): Promise<ExtractResult>;
+  /** Grounded study set (summary/concepts/explanations/flashcards/quiz) in the requested language. */
+  analyze(text: string, opts: AnalyzeOptions): Promise<import("@rojanda/types").StudySet>;
+  /** Grounded Q&A over the student's own context (or explicit external mode). */
+  ask(ctx: AskContext, question: string, mode: "sources" | "external"): Promise<AskResult>;
+  /** Turkish podcast script grounded in the material (audio synthesis is backend-only). */
+  podcastScript(study: import("@rojanda/types").StudySet, language: "tr" | "en"): Promise<string>;
+}
+
 export interface CourseService {
   list(userId: Id): Promise<Course[]>;
   get(courseId: Id): Promise<Course | null>;

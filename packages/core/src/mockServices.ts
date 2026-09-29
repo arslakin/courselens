@@ -29,6 +29,7 @@ import type {
 } from "@rojanda/types";
 import { DEFAULT_STUDY_PREFERENCES } from "@rojanda/types";
 import type {
+  AnalysisBackend,
   AuthService,
   ChatMode,
   ChatResponse,
@@ -50,11 +51,8 @@ import type {
   UploadService,
 } from "@rojanda/api";
 import { JsonStore, MemoryStore, type KeyValueStore } from "./storage";
-import {
-  MOCK_TRANSCRIPT_TR,
-  makeMockStudySet,
-  mockId,
-} from "./mockContent";
+import { MOCK_TRANSCRIPT_TR, mockId } from "./mockContent";
+import { LocalAnalysisBackend } from "./localAnalysis";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const now = () => new Date().toISOString();
@@ -249,9 +247,13 @@ export class MockTranscriptionService implements TranscriptionService {
 }
 
 export class MockStudyService implements StudyService {
-  async analyze(_lessonId: Id, _transcript: Transcript): Promise<StudySet> {
-    await delay(800); // simulate Bedrock analysis
-    return makeMockStudySet();
+  constructor(private backend: AnalysisBackend, private store: JsonStore) {}
+  async analyze(_lessonId: Id, transcript: Transcript): Promise<StudySet> {
+    // Grounded in the actual transcript/source text. Quiz length follows the
+    // signed-in student's preference (defaults to 10).
+    const user = await this.store.read<User | null>(K.user, null);
+    const quizLength = user?.profile?.preferences?.quizLength ?? 10;
+    return this.backend.analyze(transcript.text, { language: "tr", quizLength });
   }
 }
 
@@ -452,20 +454,21 @@ export class MockNotesService implements NotesService {
 }
 
 export class MockPodcastService implements PodcastService {
+  constructor(private backend: AnalysisBackend) {}
   async generate(_lessonId: Id, study: StudySet): Promise<Podcast> {
-    await delay(300);
-    return (
-      study.podcast ?? {
-        id: mockId("pod"),
-        script: "Bu dersin kısa sesli özeti (demo).",
-        durationSec: 60,
-      }
-    );
+    // Script is grounded in the lesson's own study set (not generic chatter).
+    const script = await this.backend.podcastScript(study, "tr");
+    return {
+      id: mockId("pod"),
+      script,
+      // Audio synthesis (Polly) is backend-only; left undefined until wired.
+      durationSec: Math.max(45, Math.min(150, Math.round(script.length / 12))),
+    };
   }
 }
 
 export class MockChatService implements ChatService {
-  constructor(private store: JsonStore) {}
+  constructor(private store: JsonStore, private backend: AnalysisBackend) {}
   private key(lessonId: Id) {
     return `${K.chats}:${lessonId}`;
   }
@@ -473,7 +476,6 @@ export class MockChatService implements ChatService {
     return this.store.read<ChatMessage[]>(this.key(lessonId), []);
   }
   async ask(lessonId: Id, question: string, mode: ChatMode): Promise<ChatResponse> {
-    await delay(400);
     const history = await this.history(lessonId);
     const userMsg: ChatMessage = {
       id: mockId("msg"),
@@ -483,47 +485,35 @@ export class MockChatService implements ChatService {
       createdAt: now(),
     };
 
-    let assistant: ChatMessage;
-    if (mode === "external") {
-      // External research is NOT implemented in this phase. Never mix it into
-      // grounded answers; return a clear, separate notice.
-      assistant = {
-        id: mockId("msg"),
-        lessonId,
-        role: "assistant",
-        text: "Dış kaynak araması bu sürümde henüz aktif değil.",
-        provenance: "external",
-        createdAt: now(),
-      };
-    } else {
-      // Grounded mock: answer only if the question relates to known material.
-      const grounded = /fotosentez|kloroplast|klorofil|calvin|oksijen|glikoz|ışık/i.test(
-        question
-      );
-      assistant = grounded
-        ? {
-            id: mockId("msg"),
-            lessonId,
-            role: "assistant",
-            text:
-              "Kaynaklarına göre: fotosentez, bitkilerin ışık enerjisini " +
-              "kullanarak kloroplastta glikoz ve oksijen üretmesidir. İki evre " +
-              "vardır: ışığa bağımlı reaksiyonlar ve Calvin döngüsü.",
-            provenance: "grounded",
-            createdAt: now(),
-          }
-        : {
-            id: mockId("msg"),
-            lessonId,
-            role: "assistant",
-            text: "Bu bilgi kaynaklarında yer almıyor.",
-            provenance: "not_found",
-            createdAt: now(),
-          };
-    }
+    // Build the grounding context from THIS lesson's own material only:
+    // its sources' extracted text, the lesson transcript, and its notes.
+    const lesson = (await this.store.read<Lesson[]>(K.lessons, [])).find((l) => l.id === lessonId);
+    const sources = (await this.store.read<Source[]>(K.sources, [])).filter(
+      (s) => s.lessonId === lessonId
+    );
+    const notes = (await this.store.read<Note[]>(K.notes, [])).filter((n) => n.lessonId === lessonId);
+    const sourceTexts = sources.map((s) => s.extractedText ?? "").filter(Boolean);
+    // Transcript source (kind=recording) text doubles as transcript.
+    const transcript = sources.find((s) => s.kind === "recording")?.extractedText;
+    // Also include the generated summary as supporting context if present.
+    if (lesson?.study?.summary) sourceTexts.push(lesson.study.summary);
 
+    const result = await this.backend.ask(
+      { sources: sourceTexts, transcript, notes: notes.map((n) => n.body) },
+      question,
+      mode
+    );
+
+    const assistant: ChatMessage = {
+      id: mockId("msg"),
+      lessonId,
+      role: "assistant",
+      text: result.answer,
+      provenance: result.provenance,
+      createdAt: now(),
+    };
     await this.store.write(this.key(lessonId), [...history, userMsg, assistant]);
-    return { message: assistant, provenance: assistant.provenance ?? "grounded" };
+    return { message: assistant, provenance: result.provenance };
   }
 }
 
@@ -541,8 +531,18 @@ export async function clearAllLocalData(kv: KeyValueStore): Promise<void> {
   ]);
 }
 
-/** Builds the full service set over a storage backend. */
-export function createMockServices(kv: KeyValueStore = new MemoryStore()): Services {
+/**
+ * Builds the full service set over a storage backend.
+ *
+ * @param kv      persistence (AsyncStorage on device, MemoryStore in tests)
+ * @param backend the AnalysisBackend (defaults to the local, offline, grounded
+ *                implementation; swap for RemoteAnalysisBackend when the
+ *                RojAnda backend is deployed — no screen changes required)
+ */
+export function createMockServices(
+  kv: KeyValueStore = new MemoryStore(),
+  backend: AnalysisBackend = new LocalAnalysisBackend()
+): Services {
   const store = new JsonStore(kv);
   return {
     auth: new MockAuthService(store),
@@ -554,11 +554,11 @@ export function createMockServices(kv: KeyValueStore = new MemoryStore()): Servi
     uploads: new MockUploadService(),
     recording: new MockRecordingService(),
     transcription: new MockTranscriptionService(),
-    study: new MockStudyService(),
+    study: new MockStudyService(backend, store),
     quiz: new MockQuizService(store),
     flashcards: new MockFlashcardService(store),
     notes: new MockNotesService(store),
-    podcast: new MockPodcastService(),
-    chat: new MockChatService(store),
+    podcast: new MockPodcastService(backend),
+    chat: new MockChatService(store, backend),
   };
 }

@@ -226,10 +226,22 @@ export const tr = {
 
   capture: {
     photoTitle: "Fotoğraf Çek",
-    photoHint: "Ders materyalinin fotoğrafını çek (demo).",
+    photoHint: "Ders materyalinin fotoğrafını çek; RojAnda içeriği çıkarıp özet, kavram ve sorulara dönüştürür.",
     uploadTitle: "Kaynak Yükle",
-    uploadHint: "PDF veya belge yükle (demo).",
+    uploadHint: "PDF, metin veya belge yükle; RojAnda materyalinden öğrenme içeriği üretir.",
     mockProcessed: "Örnek olarak işlendi (demo).",
+    selectCourse: "Önce bir ders seç",
+    lessonTitle: "Başlık",
+    fromCamera: "Kamera ile çek",
+    fromLibrary: "Galeriden seç",
+    pickDocument: "Belge seç",
+    processing: "İşleniyor…",
+    processingHint: "Kaynağın metne dönüştürülüp analiz ediliyor",
+    create: "Öğrenme içeriği oluştur",
+    permissionDenied: "İzin verilmedi. Ayarlardan kamera/galeri iznini açabilirsin.",
+    noText:
+      "Bu kaynaktan metin cihaz üzerinde okunamadı. Gerçek OCR/çıkarım RojAnda sunucusunda yapılır; şimdilik kaynağın kaydedildi ve yer tutucu bir metinle analiz edildi.",
+    sourceSaved: "Kaynağın kaydedildi ve derse eklendi.",
   },
 } as const;
 
