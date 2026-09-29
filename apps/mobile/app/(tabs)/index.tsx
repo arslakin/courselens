@@ -35,7 +35,17 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Logo size={32} />
+      <View style={styles.header}>
+        <Logo size={32} />
+        <Pressable
+          onPress={() => router.push("/settings")}
+          accessibilityRole="button"
+          accessibilityLabel={t.settings.title}
+          hitSlop={8}
+        >
+          <Icon name="settings" size={22} color={colors.muted} />
+        </Pressable>
+      </View>
       <Muted>{t.tagline}</Muted>
 
       <View style={styles.captureRow}>
@@ -138,6 +148,7 @@ function CaptureButton({
 }
 
 const styles = StyleSheet.create({
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   captureRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   capture: {
     flex: 1,

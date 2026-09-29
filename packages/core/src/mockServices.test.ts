@@ -1,5 +1,6 @@
 import {
   MemoryStore,
+  clearAllLocalData,
   createMockServices,
   makeMockQuiz,
   processRecordedLesson,
@@ -106,5 +107,34 @@ describe("processRecordedLesson pipeline", () => {
     const stored = await s.lessons.get(lesson.id);
     expect(stored?.status).toBe("ready");
     expect(stored?.study?.quiz.questions.length).toBe(10);
+  });
+});
+
+
+describe("course management + clearAllLocalData", () => {
+  it("renames and deletes a course; clearAllLocalData wipes courses/lessons/notes", async () => {
+    const kv = new MemoryStore();
+    const s = createMockServices(kv);
+    const user = await s.auth.signIn("a@b.co");
+    const course = await s.courses.create(user.id, "Fizik");
+
+    const renamed = await s.courses.rename(course.id, "Fizik 101");
+    expect(renamed.title).toBe("Fizik 101");
+
+    await s.lessons.create(course.id, user.id, "Ders 1");
+    await s.notes.create(user.id, "not", { courseId: course.id });
+
+    await clearAllLocalData(kv);
+    expect((await s.courses.list(user.id)).length).toBe(0);
+    expect((await s.lessons.listByCourse(course.id)).length).toBe(0);
+    expect((await s.notes.list(user.id)).length).toBe(0);
+  });
+
+  it("removes a single course", async () => {
+    const s = createMockServices();
+    const user = await s.auth.signIn("a@b.co");
+    const c = await s.courses.create(user.id, "Kimya");
+    await s.courses.remove(c.id);
+    expect((await s.courses.list(user.id)).length).toBe(0);
   });
 });

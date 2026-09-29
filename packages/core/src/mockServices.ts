@@ -407,6 +407,18 @@ export class MockChatService implements ChatService {
   }
 }
 
+/** Clears all locally-stored RojAnda data (courses, lessons, sources, notes,
+ *  chats). Used by Settings → "delete all local data". */
+export async function clearAllLocalData(kv: KeyValueStore): Promise<void> {
+  const store = new JsonStore(kv);
+  await Promise.all([
+    store.write(K.courses, []),
+    store.write(K.lessons, []),
+    store.write(K.sources, []),
+    store.write(K.notes, []),
+  ]);
+}
+
 /** Builds the full service set over a storage backend. */
 export function createMockServices(kv: KeyValueStore = new MemoryStore()): Services {
   const store = new JsonStore(kv);

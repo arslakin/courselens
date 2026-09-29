@@ -41,6 +41,31 @@ export const tr = {
     noLessons: "Bu derste henüz kayıt yok",
     noCourses: "Henüz ders oluşturmadın",
     openCourse: "Dersi aç",
+    rename: "Yeniden adlandır",
+    renameTitle: "Ders adını değiştir",
+    deleteCourse: "Dersi sil",
+    deleteConfirm: "Bu ders ve içindeki kayıtlar silinsin mi?",
+    deleteLesson: "Kaydı sil",
+    deleteLessonConfirm: "Bu ders kaydı silinsin mi?",
+  },
+
+  settings: {
+    title: "Ayarlar",
+    account: "Hesap",
+    language: "Dil",
+    languageTr: "Türkçe",
+    data: "Verilerim",
+    dataNote:
+      "Kayıtların, transkriptlerin, notların ve çalışma içeriklerin yalnızca " +
+      "bu cihazda saklanır. Hesabın ve tüm verilerin senindir.",
+    clearData: "Tüm yerel verileri sil",
+    clearDataConfirm: "Tüm dersler, kayıtlar ve notlar silinsin mi? Bu işlem geri alınamaz.",
+    signOut: "Çıkış yap",
+    privacy: "Gizlilik",
+    privacyNote:
+      "RojAnda hiçbir analitik/izleme kullanmaz. Kayıtların dışarı gönderilmez " +
+      "(bu sürümde işleme cihazda simüle edilir).",
+    version: "Sürüm",
   },
 
   record: {

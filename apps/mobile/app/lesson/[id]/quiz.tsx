@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, type ViewStyle } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import type { Quiz, QuizQuestion, QuizResult } from "@rojanda/types";
 import { colors, fontSize, fontWeight, radius, spacing } from "@rojanda/design";
+import { Alert } from "react-native";
 import { Body, Button, Card, Empty, Loading, Muted, Screen, SectionTitle } from "../../../src/ui";
 import { useApp } from "../../../src/app-context";
 import { useServices } from "../../../src/services/ServicesProvider";
@@ -11,10 +12,11 @@ const LETTERS = ["A", "B", "C", "D"] as const;
 
 export default function QuizScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useApp();
+  const { t, user } = useApp();
   const services = useServices();
 
   const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [courseId, setCourseId] = useState<string | undefined>();
   const [order, setOrder] = useState<number[]>([]); // indices into quiz.questions
   const [pos, setPos] = useState(0);
   const [selected, setSelected] = useState<(0 | 1 | 2 | 3 | null)[]>([]);
@@ -30,6 +32,7 @@ export default function QuizScreen() {
         const q = l?.study?.quiz ?? null;
         if (active && q) {
           setQuiz(q);
+          setCourseId(l?.courseId);
           setOrder(q.questions.map((_, i) => i));
           setSelected(new Array(q.questions.length).fill(null));
         } else if (active) {
@@ -41,6 +44,17 @@ export default function QuizScreen() {
       };
     }, [id, services])
   );
+
+  const addResultToNotes = async (r: QuizResult) => {
+    if (!user) return;
+    const weak = r.weakTopics.length ? `\nTekrar: ${r.weakTopics.join(", ")}` : "";
+    await services.notes.create(
+      user.id,
+      `Quiz sonucu: ${r.score}/${r.total} (%${r.percentage})${weak}`,
+      { title: "Quiz sonucu", courseId, lessonId: id, kind: "typed" }
+    );
+    Alert.alert(t.study.added);
+  };
 
   if (quiz === null)
     return <Screen scroll={false} contentStyle={{ flex: 1, justifyContent: "center" }}><Loading /></Screen>;
@@ -83,6 +97,8 @@ export default function QuizScreen() {
             );
           })
         )}
+
+        <Button label={t.study.addToNotes} icon="newNote" onPress={() => addResultToNotes(result)} />
 
         {incorrect.length > 0 ? (
           <Button
