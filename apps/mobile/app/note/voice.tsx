@@ -26,7 +26,7 @@ export default function VoiceNoteScreen() {
   const stopAndTranscribe = async () => {
     setPhase("transcribing");
     const transcript = await services.transcription.transcribeVoiceNote("mock://voice");
-    setText(transcript);
+    setText(transcript ?? "");
     setPhase("editing");
   };
 

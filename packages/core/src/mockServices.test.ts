@@ -1,10 +1,21 @@
 import {
   MemoryStore,
+  MockTranscriptionService,
   clearAllLocalData,
   createMockServices,
   makeMockQuiz,
   processRecordedLesson,
 } from "./index";
+
+/**
+ * Helper: services with the DETERMINISTIC transcription override so the full
+ * record -> transcribe -> analyze pipeline reaches `ready` in tests. The app
+ * itself uses the honest/pending transcription (no fabricated transcripts).
+ */
+const withMockTranscription = (kv?: MemoryStore) =>
+  createMockServices(kv ?? new MemoryStore(), undefined, {
+    transcription: new MockTranscriptionService(),
+  });
 
 describe("MockCourseService + LessonService", () => {
   it("creates courses and lessons scoped to a user", async () => {
@@ -94,14 +105,14 @@ describe("ChatService grounding (real, from the lesson's own sources)", () => {
 });
 
 describe("processRecordedLesson pipeline", () => {
-  it("moves a lesson through statuses to ready with a full study set", async () => {
-    const s = createMockServices();
+  it("moves a lesson through statuses to ready with a full study set (real transcript)", async () => {
+    const s = withMockTranscription();
     const user = await s.auth.signIn("a@b.co");
     const course = await s.courses.create(user.id, "Biyoloji");
     const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
 
     const statuses: string[] = [];
-    const { study } = await processRecordedLesson(
+    const { study, awaitingTranscription } = await processRecordedLesson(
       s,
       lesson.id,
       "mock://audio",
@@ -109,15 +120,50 @@ describe("processRecordedLesson pipeline", () => {
       { onStatus: (st) => statuses.push(st) }
     );
 
+    expect(awaitingTranscription).toBe(false);
     expect(statuses).toEqual(["uploaded", "transcribing", "transcribed", "analyzing", "ready"]);
-    expect(study.summary.length).toBeGreaterThan(0);
-    expect(study.quiz.questions.length).toBe(10);
-    expect(study.flashcards.length).toBeGreaterThan(0);
-    expect(study.podcast).toBeDefined();
+    expect(study!.summary.length).toBeGreaterThan(0);
+    expect(study!.quiz.questions.length).toBe(10);
+    expect(study!.flashcards.length).toBeGreaterThan(0);
+    expect(study!.podcast).toBeDefined();
 
     const stored = await s.lessons.get(lesson.id);
     expect(stored?.status).toBe("ready");
     expect(stored?.study?.quiz.questions.length).toBe(10);
+  });
+
+  it("stops honestly at awaiting_transcription when transcription is pending (no fabrication)", async () => {
+    // Default services => PendingTranscriptionService (what the app ships).
+    const s = createMockServices();
+    const user = await s.auth.signIn("a@b.co");
+    const course = await s.courses.create(user.id, "Biyoloji");
+    const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
+
+    const statuses: string[] = [];
+    const { study, awaitingTranscription } = await processRecordedLesson(
+      s,
+      lesson.id,
+      "file:///rec.m4a",
+      120,
+      { onStatus: (st) => statuses.push(st) }
+    );
+
+    expect(awaitingTranscription).toBe(true);
+    expect(study).toBeUndefined();
+    expect(statuses).toEqual(["uploaded", "transcribing", "awaiting_transcription"]);
+
+    const stored = await s.lessons.get(lesson.id);
+    expect(stored?.status).toBe("awaiting_transcription");
+    expect(stored?.study).toBeUndefined();
+    expect(stored?.durationSec).toBe(120);
+
+    // Audio preserved as the student's own recording; NO fabricated transcript.
+    const sources = await s.sources.listByLesson(lesson.id);
+    expect(sources.length).toBe(1);
+    expect(sources[0].kind).toBe("recording");
+    expect(sources[0].uri).toBe("file:///rec.m4a");
+    expect(sources[0].extractedText).toBeUndefined();
+    expect(sources[0].userId).toBe(user.id);
   });
 });
 
@@ -188,7 +234,7 @@ describe("user isolation", () => {
 
 describe("course/lesson ownership", () => {
   it("generated study content stays associated with its own course/lesson", async () => {
-    const s = createMockServices();
+    const s = withMockTranscription();
     const user = await s.auth.signIn("a@x.co");
     const stat = await s.courses.create(user.id, "İstatistik");
     const bio = await s.courses.create(user.id, "Biyoloji");
@@ -221,7 +267,7 @@ describe("course/lesson ownership", () => {
 
 describe("progress derivation", () => {
   it("derives counts, average, and difficult concepts from the user's own attempts", async () => {
-    const s = createMockServices();
+    const s = withMockTranscription();
     const user = await s.auth.signIn("a@x.co");
     const c = await s.courses.create(user.id, "Ders");
     const l = await s.lessons.create(c.id, user.id, "Kayıt");

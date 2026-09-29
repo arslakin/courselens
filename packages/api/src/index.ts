@@ -144,12 +144,20 @@ export interface RecordingService {
   start(): Promise<RecordingHandle>;
 }
 
-/** Speech-to-text. Mock now; Amazon Transcribe (tr-TR) later. */
+/**
+ * Speech-to-text. Until Amazon Transcribe (tr-TR) is connected via the RojAnda
+ * backend, the implementation returns a clearly-labeled PENDING transcript
+ * (empty text, `pending: true`) rather than fabricating content. When the
+ * backend exists, swap in a real implementation without changing callers.
+ */
 export interface TranscriptionService {
   /** Full lecture recording -> transcript (async in real impl). */
   transcribeLesson(lessonId: Id, audioUri: string): Promise<Transcript>;
-  /** Short spoken note -> text (used by Sesli Not). */
-  transcribeVoiceNote(audioUri: string): Promise<string>;
+  /**
+   * Short spoken note -> text. Returns `null` when automatic transcription is
+   * not available yet (never fabricated); the student can type the text.
+   */
+  transcribeVoiceNote(audioUri: string): Promise<string | null>;
 }
 
 /** Generates the grounded study set from a lesson's own material. */

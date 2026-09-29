@@ -79,6 +79,10 @@ export type LessonStatus =
   | "uploaded"
   | "transcribing"
   | "transcribed"
+  // Audio is recorded and preserved, but automatic transcription is not yet
+  // available (no transcription backend connected). We stop here rather than
+  // fabricating a transcript; analysis resumes once a transcript exists.
+  | "awaiting_transcription"
   | "analyzing"
   | "ready"
   | "failed";
@@ -120,6 +124,12 @@ export interface Transcript {
   language: string; // e.g. "tr-TR"
   confidenceAvg?: number;
   editedByUser: boolean;
+  /**
+   * True when no automatic transcript is available yet (transcription backend
+   * not connected). `text` is empty in this case — never fabricated. Set to
+   * false once a real (or user-edited) transcript exists.
+   */
+  pending?: boolean;
 }
 
 // --- Generated study content ----------------------------------------------

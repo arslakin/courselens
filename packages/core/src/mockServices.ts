@@ -228,9 +228,39 @@ export class MockRecordingService implements RecordingService {
   }
 }
 
+/**
+ * Honest, default transcription: no transcription backend is connected, so this
+ * returns a clearly PENDING transcript (empty text) rather than fabricating
+ * content. The audio is still preserved and playable; the student can type the
+ * text, and real transcription can fill it in later. This is what the shipping
+ * app uses today.
+ */
+export class PendingTranscriptionService implements TranscriptionService {
+  async transcribeLesson(lessonId: Id, _audioUri: string): Promise<Transcript> {
+    return {
+      id: mockId("tr"),
+      lessonId,
+      text: "",
+      language: "tr-TR",
+      editedByUser: false,
+      pending: true,
+    };
+  }
+  async transcribeVoiceNote(_audioUri: string): Promise<string | null> {
+    // No automatic transcription available yet — never fabricate text.
+    return null;
+  }
+}
+
+/**
+ * Deterministic transcription used ONLY in tests to exercise the full
+ * record -> transcribe -> analyze pipeline with known text. Not wired into the
+ * app (which uses PendingTranscriptionService) so we never ship fabricated
+ * transcripts.
+ */
 export class MockTranscriptionService implements TranscriptionService {
   async transcribeLesson(lessonId: Id, _audioUri: string): Promise<Transcript> {
-    await delay(700); // simulate async transcription
+    await delay(50);
     return {
       id: mockId("tr"),
       lessonId,
@@ -238,10 +268,11 @@ export class MockTranscriptionService implements TranscriptionService {
       language: "tr-TR",
       confidenceAvg: 0.93,
       editedByUser: false,
+      pending: false,
     };
   }
-  async transcribeVoiceNote(_audioUri: string): Promise<string> {
-    await delay(500);
+  async transcribeVoiceNote(_audioUri: string): Promise<string | null> {
+    await delay(50);
     return "Hoca bu konunun sınavda önemli olduğunu söyledi.";
   }
 }
@@ -539,9 +570,21 @@ export async function clearAllLocalData(kv: KeyValueStore): Promise<void> {
  *                implementation; swap for RemoteAnalysisBackend when the
  *                RojAnda backend is deployed — no screen changes required)
  */
+/**
+ * Optional overrides let the platform layer inject real, device-backed
+ * implementations (e.g. the mobile app supplies an expo-av RecordingService)
+ * while everything else stays on the local in-memory implementations. Screens
+ * and the pipeline depend only on the interfaces, so nothing else changes.
+ */
+export interface ServiceOverrides {
+  recording?: RecordingService;
+  transcription?: TranscriptionService;
+}
+
 export function createMockServices(
   kv: KeyValueStore = new MemoryStore(),
-  backend: AnalysisBackend = new LocalAnalysisBackend()
+  backend: AnalysisBackend = new LocalAnalysisBackend(),
+  overrides: ServiceOverrides = {}
 ): Services {
   const store = new JsonStore(kv);
   return {
@@ -552,8 +595,10 @@ export function createMockServices(
     lessons: new MockLessonService(store),
     sources: new MockSourceService(store),
     uploads: new MockUploadService(),
-    recording: new MockRecordingService(),
-    transcription: new MockTranscriptionService(),
+    // No real device recorder by default (tests/web). The mobile app injects
+    // an expo-av RecordingService. Transcription is honest/pending by default.
+    recording: overrides.recording ?? new MockRecordingService(),
+    transcription: overrides.transcription ?? new PendingTranscriptionService(),
     study: new MockStudyService(backend, store),
     quiz: new MockQuizService(store),
     flashcards: new MockFlashcardService(store),

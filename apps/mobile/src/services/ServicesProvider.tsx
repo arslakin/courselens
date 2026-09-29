@@ -4,6 +4,7 @@ import type { AnalysisBackend, Services } from "@rojanda/api";
 import { asyncStore } from "./store";
 import { ANALYSIS_BASE_URL } from "../config";
 import { RemoteAnalysisBackend } from "./RemoteAnalysisBackend";
+import { ExpoRecordingService } from "./ExpoRecordingService";
 
 /**
  * Provides the app's Services to all screens via context.
@@ -26,7 +27,12 @@ function makeBackend(): AnalysisBackend {
 export function ServicesProvider({ children }: { children: React.ReactNode }) {
   const bundle = useMemo<ServicesBundle>(() => {
     const backend = makeBackend();
-    return { services: createMockServices(asyncStore, backend), backend };
+    // Inject the real device recorder; transcription stays honest/pending
+    // (default) until the RojAnda backend is connected.
+    const services = createMockServices(asyncStore, backend, {
+      recording: new ExpoRecordingService(),
+    });
+    return { services, backend };
   }, []);
   return <ServicesContext.Provider value={bundle}>{children}</ServicesContext.Provider>;
 }
