@@ -1,12 +1,14 @@
 import React, { useCallback, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams, Stack } from "expo-router";
 import type { Course, Lesson, Note } from "@rojanda/types";
+import { colors, fontSize, fontWeight, radius, spacing, type IconKey } from "@rojanda/design";
 import {
   Body,
   Button,
   Card,
   Empty,
+  Icon,
   IconLabel,
   Input,
   Muted,
@@ -17,6 +19,17 @@ import {
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
 
+/** A course-workspace section tile (icon + count + label). */
+function WsTile({ icon, label, count }: { icon: IconKey; label: string; count: number }) {
+  return (
+    <View style={styles.tile}>
+      <Icon name={icon} size={20} color={colors.accent} />
+      <Text style={styles.tileCount}>{count}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
+    </View>
+  );
+}
+
 export default function CourseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, user } = useApp();
@@ -24,6 +37,7 @@ export default function CourseDetailScreen() {
   const [course, setCourse] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [sourceCount, setSourceCount] = useState(0);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
 
@@ -34,9 +48,14 @@ export default function CourseDetailScreen() {
       services.lessons.listByCourse(id),
       services.notes.list(user.id, { courseId: id }),
     ]);
+    // Sources are stored per-lesson; sum across this course's lessons only,
+    // so counts reflect ONLY this course's own material.
+    let sources = 0;
+    for (const l of ls) sources += (await services.sources.listByLesson(l.id)).length;
     setCourse(c);
     setLessons(ls);
     setNotes(ns);
+    setSourceCount(sources);
   }, [id, services, user]);
 
   useFocusEffect(
@@ -117,6 +136,31 @@ export default function CourseDetailScreen() {
         onPress={() => router.push(`/record?courseId=${id}`)}
       />
 
+      {/* Course workspace — everything below is scoped to THIS course only. */}
+      {(() => {
+        const ready = lessons.filter((l) => l.status === "ready" && l.study);
+        const summaries = ready.length;
+        const flashcards = ready.reduce((s, l) => s + (l.study!.flashcards?.length ?? 0), 0);
+        const quizzes = ready.filter((l) => (l.study!.quiz?.questions.length ?? 0) > 0).length;
+        const podcasts = ready.filter((l) => l.study!.podcast).length;
+        const sections: { icon: Parameters<typeof WsTile>[0]["icon"]; label: string; count: number }[] = [
+          { icon: "uploadSource", label: t.courseWs.sources, count: sourceCount },
+          { icon: "recordLesson", label: t.courseWs.recordings, count: lessons.length },
+          { icon: "summary", label: t.courseWs.summaries, count: summaries },
+          { icon: "notes", label: t.courseWs.notes, count: notes.length },
+          { icon: "flashcards", label: t.courseWs.flashcards, count: flashcards },
+          { icon: "quiz", label: t.courseWs.quizzes, count: quizzes },
+          { icon: "podcast", label: t.courseWs.podcasts, count: podcasts },
+        ];
+        return (
+          <View style={styles.tiles}>
+            {sections.map((s) => (
+              <WsTile key={s.label} icon={s.icon} label={s.label} count={s.count} />
+            ))}
+          </View>
+        );
+      })()}
+
       <SectionTitle>{t.courses.lessons}</SectionTitle>
       {lessons.length === 0 ? (
         <Empty label={t.courses.noLessons} />
@@ -149,3 +193,20 @@ export default function CourseDetailScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  tiles: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  tile: {
+    flexBasis: "30%",
+    flexGrow: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: 2,
+    alignItems: "flex-start",
+  },
+  tileCount: { color: colors.text, fontSize: fontSize.lg, fontWeight: fontWeight.bold },
+  tileLabel: { color: colors.muted, fontSize: fontSize.xs },
+});
