@@ -8,6 +8,8 @@
 import React from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,18 +30,30 @@ export function Screen({
   scroll?: boolean;
   contentStyle?: ViewStyle;
 }) {
+  // KeyboardAvoidingView keeps inputs visible when the keyboard opens (notes,
+  // chat, record title). "padding" on iOS, height on Android is the standard
+  // pairing; uses only React Native core (no extra native dependency).
+  const behavior = Platform.OS === "ios" ? "padding" : undefined;
+
   if (scroll) {
     return (
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={[styles.screenContent, contentStyle]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {children}
-      </ScrollView>
+      <KeyboardAvoidingView style={styles.screen} behavior={behavior}>
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={[styles.screenContent, contentStyle]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
-  return <View style={[styles.screen, styles.screenContent, contentStyle]}>{children}</View>;
+  return (
+    <KeyboardAvoidingView style={styles.screen} behavior={behavior}>
+      <View style={[styles.screen, styles.screenContent, contentStyle]}>{children}</View>
+    </KeyboardAvoidingView>
+  );
 }
 
 export function Card({

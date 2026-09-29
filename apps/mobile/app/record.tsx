@@ -95,7 +95,13 @@ export default function RecordScreen() {
         <>
           <SectionTitle>{t.record.selectCourse}</SectionTitle>
           {courses.length === 0 ? (
-            <Muted>{t.courses.noCourses}</Muted>
+            <>
+              <Muted>{t.courses.noCourses}</Muted>
+              <Button
+                label={`+ ${t.courses.newCourse}`}
+                onPress={() => router.push("/(tabs)/courses")}
+              />
+            </>
           ) : (
             <Row style={{ flexWrap: "wrap" }}>
               {courses.map((c) => (
