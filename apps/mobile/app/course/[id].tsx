@@ -40,7 +40,8 @@ export default function CourseDetailScreen() {
       <Stack.Screen options={{ title: course?.title ?? t.courses.title }} />
 
       <Button
-        label={`🎙️ ${t.home.recordLesson}`}
+        label={t.home.recordLesson}
+        icon="recordLesson"
         variant="primary"
         onPress={() => router.push(`/record?courseId=${id}`)}
       />

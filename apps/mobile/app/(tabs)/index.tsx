@@ -2,8 +2,8 @@ import React, { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import type { Lesson, Note } from "@rojanda/types";
-import { colors, fontSize, fontWeight, radius, spacing, TOUCH_TARGET } from "@rojanda/design";
-import { Body, Card, Muted, Screen, SectionTitle } from "../../src/ui";
+import { colors, fontSize, fontWeight, radius, spacing, TOUCH_TARGET, type IconKey } from "@rojanda/design";
+import { Body, Card, Icon, IconLabel, Logo, Muted, Screen, SectionTitle } from "../../src/ui";
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
 
@@ -35,22 +35,22 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Text style={styles.hero}>{t.appName}</Text>
+      <Logo size={32} />
       <Muted>{t.tagline}</Muted>
 
       <View style={styles.captureRow}>
         <CaptureButton
-          emoji="📷"
+          icon="takePhoto"
           label={t.home.takePhoto}
           onPress={() => router.push("/capture/photo")}
         />
         <CaptureButton
-          emoji="📁"
+          icon="uploadSource"
           label={t.home.uploadSource}
           onPress={() => router.push("/capture/upload")}
         />
         <CaptureButton
-          emoji="🎙️"
+          icon="recordLesson"
           label={t.home.recordLesson}
           primary
           onPress={() => router.push("/record")}
@@ -59,11 +59,11 @@ export default function HomeScreen() {
 
       <View style={styles.quickRow}>
         <Card style={styles.quick} onPress={() => router.push("/(tabs)/courses")}>
-          <Text style={styles.quickEmoji}>📚</Text>
+          <Icon name="courses" size={20} color={colors.accent} />
           <Body>{t.home.myCourses}</Body>
         </Card>
         <Card style={styles.quick} onPress={() => router.push("/(tabs)/notes")}>
-          <Text style={styles.quickEmoji}>📝</Text>
+          <Icon name="notes" size={20} color={colors.accent} />
           <Body>{t.home.myNotes}</Body>
         </Card>
       </View>
@@ -87,7 +87,7 @@ export default function HomeScreen() {
         recentNotes.map((n) => (
           <Card key={n.id} onPress={() => router.push(`/note/${n.id}`)}>
             <Body>{n.title || n.body.slice(0, 40)}</Body>
-            <Muted>{n.kind === "voice" ? "🎙️ Sesli Not" : "📝 Not"}</Muted>
+            <IconLabel icon={n.kind === "voice" ? "voiceNote" : "newNote"} label={n.kind === "voice" ? "Sesli Not" : "Not"} />
           </Card>
         ))
       )}
@@ -110,12 +110,12 @@ function statusLabel(status: Lesson["status"], t: ReturnType<typeof useApp>["t"]
 }
 
 function CaptureButton({
-  emoji,
+  icon,
   label,
   onPress,
   primary,
 }: {
-  emoji: string;
+  icon: IconKey;
   label: string;
   onPress: () => void;
   primary?: boolean;
@@ -131,14 +131,13 @@ function CaptureButton({
         pressed && { opacity: 0.75 },
       ]}
     >
-      <Text style={styles.captureEmoji}>{emoji}</Text>
+      <Icon name={icon} size={26} color={primary ? colors.accent : colors.text} variant={primary ? "filled" : "outline"} />
       <Text style={[styles.captureLabel, primary && styles.captureLabelPrimary]}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { color: colors.text, fontSize: fontSize.xxl, fontWeight: fontWeight.bold },
   captureRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   capture: {
     flex: 1,
@@ -153,10 +152,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   capturePrimary: { borderColor: colors.accent },
-  captureEmoji: { fontSize: 28 },
-  captureLabel: { color: colors.text, fontSize: fontSize.xs, fontWeight: fontWeight.medium, textAlign: "center" },
+  captureLabel: { color: colors.text, fontSize: fontSize.xs, fontWeight: fontWeight.medium, textAlign: "center", marginTop: spacing.xs },
   captureLabelPrimary: { color: colors.accent },
   quickRow: { flexDirection: "row", gap: spacing.sm },
-  quick: { flex: 1, minHeight: TOUCH_TARGET, alignItems: "flex-start" },
-  quickEmoji: { fontSize: 22 },
+  quick: { flex: 1, minHeight: TOUCH_TARGET, alignItems: "flex-start", gap: spacing.xs },
 });

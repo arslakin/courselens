@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import type { Flashcard } from "@rojanda/types";
 import { colors, fontSize, fontWeight, radius, spacing } from "@rojanda/design";
-import { Button, Empty, Loading, Muted, Row, Screen } from "../../../src/ui";
+import { Button, Empty, IconLabel, Loading, Muted, Row, Screen } from "../../../src/ui";
 import { useApp } from "../../../src/app-context";
 import { useServices } from "../../../src/services/ServicesProvider";
 
@@ -63,19 +63,20 @@ export default function FlashcardsScreen() {
         <Text style={styles.face}>{revealed ? card.back : card.front}</Text>
         {!revealed ? <Muted>{t.flashcards.showAnswer}</Muted> : null}
         {states[card.id] ? (
-          <Text style={styles.badge}>
-            {states[card.id] === "known" ? `✓ ${t.flashcards.known}` : `↻ ${t.flashcards.review}`}
-          </Text>
+          <IconLabel
+            icon={states[card.id] === "known" ? "correct" : "previous"}
+            label={states[card.id] === "known" ? t.flashcards.known : t.flashcards.review}
+          />
         ) : null}
       </Pressable>
 
       <Row>
-        <Button label={t.common.previous} onPress={goPrev} />
-        <Button label={t.common.next} onPress={goNext} />
+        <Button label={t.common.previous} icon="previous" onPress={goPrev} />
+        <Button label={t.common.next} icon="next" onPress={goNext} />
       </Row>
       <Row>
-        <Button label={`✓ ${t.flashcards.known}`} variant="good" onPress={() => mark("known")} />
-        <Button label={`↻ ${t.flashcards.review}`} variant="secondary" onPress={() => mark("review")} />
+        <Button label={t.flashcards.known} icon="correct" variant="good" onPress={() => mark("known")} />
+        <Button label={t.flashcards.review} variant="secondary" onPress={() => mark("review")} />
       </Row>
     </Screen>
   );
@@ -94,5 +95,4 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   face: { color: colors.text, fontSize: fontSize.lg, fontWeight: fontWeight.medium, textAlign: "center" },
-  badge: { color: colors.accent, fontSize: fontSize.xs },
 });

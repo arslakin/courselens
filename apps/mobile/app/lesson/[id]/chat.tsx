@@ -47,12 +47,14 @@ export default function ChatScreen() {
       {/* Mode toggle — grounded by default; external is explicit + separate. */}
       <Row>
         <Button
-          label={`📚 ${t.chat.modeSources}`}
+          label={t.chat.modeSources}
+          icon="sources"
           variant={mode === "sources" ? "primary" : "secondary"}
           onPress={() => setMode("sources")}
         />
         <Button
-          label={`🌐 ${t.chat.modeExternal}`}
+          label={t.chat.modeExternal}
+          icon="external"
           variant={mode === "external" ? "primary" : "secondary"}
           onPress={() => setMode("external")}
         />

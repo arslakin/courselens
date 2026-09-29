@@ -58,33 +58,35 @@ export default function LessonScreen() {
       ) : (
         <>
           {/* Ders Özeti */}
-          <SectionTitle>📝 {t.study.summary}</SectionTitle>
+          <SectionTitle icon="summary">{t.study.summary}</SectionTitle>
           <Card>
             <Body>{study!.summary}</Body>
-            <Button label={t.study.addToNotes} onPress={() => addToNotes(t.study.summary, study!.summary)} />
+            <Button label={t.study.addToNotes} icon="newNote" onPress={() => addToNotes(t.study.summary, study!.summary)} />
           </Card>
 
           {/* Ana Kavramlar */}
-          <SectionTitle>🧠 {t.study.concepts}</SectionTitle>
+          <SectionTitle icon="concepts">{t.study.concepts}</SectionTitle>
           {study!.concepts.map((c) => (
             <Card key={c.name}>
               <Body>{c.name}</Body>
               <Muted>{c.explanation}</Muted>
               <Button
                 label={t.study.addToNotes}
+                icon="newNote"
                 onPress={() => addToNotes(c.name, `${c.name}: ${c.explanation}`)}
               />
             </Card>
           ))}
 
           {/* Açıklamalar */}
-          <SectionTitle>💡 {t.study.explanations}</SectionTitle>
+          <SectionTitle icon="explanations">{t.study.explanations}</SectionTitle>
           {study!.explanations.map((e) => (
             <Card key={e.concept}>
               <Body>{e.concept}</Body>
               <Muted>{e.plain}</Muted>
               <Button
                 label={t.study.addToNotes}
+                icon="newNote"
                 onPress={() => addToNotes(e.concept, `${e.concept}\n${e.plain}`)}
               />
             </Card>
@@ -93,12 +95,13 @@ export default function LessonScreen() {
           {/* Navigation to interactive/other tools */}
           <SectionTitle>Çalışma Araçları</SectionTitle>
           <Row style={{ flexWrap: "wrap" }}>
-            <Button label={`🃏 ${t.study.flashcards}`} onPress={() => router.push(`/lesson/${id}/flashcards`)} />
-            <Button label={`❓ ${t.study.quiz}`} variant="primary" onPress={() => router.push(`/lesson/${id}/quiz`)} />
-            <Button label={`🎧 ${t.study.podcast}`} onPress={() => router.push(`/lesson/${id}/podcast`)} />
-            <Button label={`💬 ${t.study.ask}`} onPress={() => router.push(`/lesson/${id}/chat`)} />
+            <Button label={t.study.flashcards} icon="flashcards" onPress={() => router.push(`/lesson/${id}/flashcards`)} />
+            <Button label={t.study.quiz} icon="quiz" variant="primary" onPress={() => router.push(`/lesson/${id}/quiz`)} />
+            <Button label={t.study.podcast} icon="podcast" onPress={() => router.push(`/lesson/${id}/podcast`)} />
+            <Button label={t.study.ask} icon="chat" onPress={() => router.push(`/lesson/${id}/chat`)} />
             <Button
-              label={`📝 ${t.study.notes}`}
+              label={t.study.notes}
+              icon="notes"
               onPress={() => router.push(`/note/new?courseId=${lesson.courseId}&lessonId=${lesson.id}`)}
             />
           </Row>

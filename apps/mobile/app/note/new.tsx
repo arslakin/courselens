@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { Button, Input, Muted, Screen } from "../../src/ui";
+import { Button, IconLabel, Input, Screen } from "../../src/ui";
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
 
@@ -33,8 +33,8 @@ export default function NewNoteScreen() {
         multiline
         style={{ minHeight: 160, textAlignVertical: "top" }}
       />
-      {params.courseId ? <Muted>{t.notes.associatedCourse}: ✓</Muted> : null}
-      {params.lessonId ? <Muted>{t.notes.associatedLesson}: ✓</Muted> : null}
+      {params.courseId ? <IconLabel icon="correct" label={t.notes.associatedCourse} /> : null}
+      {params.lessonId ? <IconLabel icon="correct" label={t.notes.associatedLesson} /> : null}
       <Button label={t.common.save} variant="primary" onPress={save} disabled={!body.trim()} />
     </Screen>
   );

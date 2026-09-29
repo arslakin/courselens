@@ -49,7 +49,7 @@ export default function VoiceNoteScreen() {
       </Card>
 
       {phase === "idle" && (
-        <Button label={`🎙️ ${t.notes.voiceNote}`} variant="primary" onPress={startListening} />
+        <Button label={t.notes.voiceNote} icon="voiceNote" variant="primary" onPress={startListening} />
       )}
 
       {phase === "listening" && (

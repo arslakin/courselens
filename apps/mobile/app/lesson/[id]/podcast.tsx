@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import type { Podcast } from "@rojanda/types";
 import { colors, radius, spacing } from "@rojanda/design";
-import { Body, Button, Card, Loading, Muted, Screen } from "../../../src/ui";
+import { Body, Button, Card, Icon, Loading, Muted, Screen } from "../../../src/ui";
 import { useApp } from "../../../src/app-context";
 import { useServices } from "../../../src/services/ServicesProvider";
 
@@ -34,7 +34,9 @@ export default function PodcastScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: t.podcast.title }} />
-      <Text style={styles.hero}>🎧</Text>
+      <View style={styles.heroWrap}>
+        <Icon name="podcast" size={44} color={colors.accent} variant="filled" />
+      </View>
       <Body>{t.podcast.subtitle}</Body>
 
       <Card>
@@ -42,6 +44,7 @@ export default function PodcastScreen() {
         <View style={styles.player}>
           <Button
             label={playing ? t.podcast.pause : t.podcast.play}
+            icon={playing ? "pause" : "play"}
             variant="primary"
             onPress={() => setPlaying((p) => !p)}
           />
@@ -64,7 +67,7 @@ export default function PodcastScreen() {
 }
 
 const styles = StyleSheet.create({
-  hero: { fontSize: 48, textAlign: "center" },
+  heroWrap: { alignItems: "center", paddingVertical: spacing.md },
   player: { gap: spacing.sm },
   progressTrack: { height: 6, backgroundColor: colors.surface2, borderRadius: radius.pill, overflow: "hidden" },
   progressFill: { height: 6, backgroundColor: colors.accent },

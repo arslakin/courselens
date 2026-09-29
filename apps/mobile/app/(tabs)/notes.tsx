@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import type { Note } from "@rojanda/types";
-import { Body, Button, Card, Empty, Muted, Row, Screen, SectionTitle } from "../../src/ui";
+import { Body, Button, Card, Empty, IconLabel, Row, Screen, SectionTitle } from "../../src/ui";
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
 
@@ -28,12 +28,14 @@ export default function NotesScreen() {
     <Screen>
       <Row>
         <Button
-          label={`+ ${t.notes.newNote}`}
+          label={t.notes.newNote}
+          icon="add"
           variant="primary"
           onPress={() => router.push("/note/new")}
         />
         <Button
-          label={`🎙️ ${t.notes.voiceNote}`}
+          label={t.notes.voiceNote}
+          icon="voiceNote"
           onPress={() => router.push("/note/voice")}
         />
       </Row>
@@ -45,7 +47,7 @@ export default function NotesScreen() {
         notes.map((n) => (
           <Card key={n.id} onPress={() => router.push(`/note/${n.id}`)}>
             <Body>{n.title || n.body.slice(0, 48)}</Body>
-            <Muted>{n.kind === "voice" ? "🎙️ Sesli Not" : "📝 Not"}</Muted>
+            <IconLabel icon={n.kind === "voice" ? "voiceNote" : "newNote"} label={n.kind === "voice" ? "Sesli Not" : "Not"} />
           </Card>
         ))
       )}

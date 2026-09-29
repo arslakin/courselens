@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { StyleSheet, Text } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Stack } from "expo-router";
-import { Body, Button, Card, Muted, Screen } from "../../src/ui";
+import { colors, spacing } from "@rojanda/design";
+import { Body, Button, Card, Icon, Muted, Screen } from "../../src/ui";
 import { useApp } from "../../src/app-context";
 
 /**
@@ -16,10 +17,12 @@ export default function PhotoCaptureScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: t.capture.photoTitle }} />
-      <Text style={styles.hero}>📷</Text>
+      <View style={styles.heroWrap}>
+        <Icon name="takePhoto" size={44} color={colors.accent} variant="filled" />
+      </View>
       <Body>{t.capture.photoHint}</Body>
       {!processed ? (
-        <Button label={t.capture.photoTitle} variant="primary" onPress={() => setProcessed(true)} />
+        <Button label={t.capture.photoTitle} icon="takePhoto" variant="primary" onPress={() => setProcessed(true)} />
       ) : (
         <Card>
           <Muted>{t.capture.mockProcessed}</Muted>
@@ -29,4 +32,4 @@ export default function PhotoCaptureScreen() {
   );
 }
 
-const styles = StyleSheet.create({ hero: { fontSize: 48, textAlign: "center" } });
+const styles = StyleSheet.create({ heroWrap: { alignItems: "center", paddingVertical: spacing.md } });

@@ -98,7 +98,8 @@ export default function RecordScreen() {
             <>
               <Muted>{t.courses.noCourses}</Muted>
               <Button
-                label={`+ ${t.courses.newCourse}`}
+                label={t.courses.newCourse}
+                icon="add"
                 onPress={() => router.push("/(tabs)/courses")}
               />
             </>
@@ -119,7 +120,8 @@ export default function RecordScreen() {
             <Muted>{t.record.consentNote}</Muted>
           </Card>
           <Button
-            label={`🎙️ ${t.record.start}`}
+            label={t.record.start}
+            icon="recordLesson"
             variant="primary"
             onPress={start}
             disabled={!courseId}
