@@ -24,7 +24,41 @@ export interface User {
   displayName: string;
   locale: Locale;
   createdAt: ISODateString;
+  /**
+   * Optional profile fields. All optional so previously-stored users remain
+   * valid (backward compatible); resolved with defaults by ProfileService.
+   */
+  profile?: StudentProfile;
 }
+
+/** Number of questions a generated quiz should contain. */
+export type QuizLength = 10 | 20;
+
+/** Student-controlled preferences (Benim Alanım). Minimal PII by design. */
+export interface StudyPreferences {
+  quizLength: QuizLength;
+  /** Preferred podcast recap length. */
+  podcastLength: "short" | "medium";
+  /** Larger text / higher contrast, etc. */
+  largeText: boolean;
+  reduceMotion: boolean;
+}
+
+export interface StudentProfile {
+  /** Optional, student-provided. Not required; do not collect unnecessary PII. */
+  school?: string;
+  grade?: string;
+  /** Avatar is a chosen color + initials (no photo upload required in MVP). */
+  avatarColor?: string;
+  preferences: StudyPreferences;
+}
+
+export const DEFAULT_STUDY_PREFERENCES: StudyPreferences = {
+  quizLength: 10,
+  podcastLength: "short",
+  largeText: false,
+  reduceMotion: false,
+};
 
 // --- Course / Lesson -------------------------------------------------------
 
@@ -192,7 +226,46 @@ export interface QuizResult {
   quizId: Id;
   answers: QuizAnswer[];
   score: number; // number correct
-  total: number; // out of (10)
+  total: number; // out of (10 or 20)
   percentage: number;
   weakTopics: string[];
+}
+
+// --- Progress / history (İlerlemem) ----------------------------------------
+
+/** A persisted quiz attempt, scoped to a user (and lesson/course). */
+export interface QuizAttempt {
+  id: Id;
+  userId: Id;
+  lessonId?: Id;
+  courseId?: Id;
+  score: number;
+  total: number;
+  percentage: number;
+  weakTopics: string[];
+  createdAt: ISODateString;
+}
+
+/** A persisted flashcard-study event (one card marked known/review). */
+export interface FlashcardStudyEvent {
+  id: Id;
+  userId: Id;
+  lessonId?: Id;
+  cardId: Id;
+  state: "known" | "review";
+  createdAt: ISODateString;
+}
+
+/**
+ * Derived, informational progress. Purely counts/history of the student's own
+ * activity — no invented learning-performance claims.
+ */
+export interface ProgressSummary {
+  coursesCount: number;
+  lessonsReady: number; // lessons whose study set is ready
+  flashcardsStudied: number;
+  quizAttempts: QuizAttempt[]; // most-recent first
+  averageQuizPercentage: number | null; // null when no attempts
+  /** Topics the student's incorrect answers touched, most frequent first. */
+  difficultConcepts: string[];
 }

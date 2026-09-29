@@ -17,8 +17,10 @@ export const ICONS = {
   courses: "book",
   notes: "document-text",
   settings: "settings",
+  profile: "person-circle",
 
   // Study tools
+  suggestion: "sparkles",
   summary: "reader",
   concepts: "bulb",
   explanations: "sparkles",

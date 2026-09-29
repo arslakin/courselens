@@ -9,7 +9,7 @@ import { useServices } from "../../../src/services/ServicesProvider";
 
 export default function FlashcardsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useApp();
+  const { t, user } = useApp();
   const services = useServices();
   const [cards, setCards] = useState<Flashcard[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -37,7 +37,7 @@ export default function FlashcardsScreen() {
   const card = cards[index];
   const mark = async (state: Flashcard["state"]) => {
     setStates((s) => ({ ...s, [card.id]: state }));
-    if (id) await services.flashcards.mark(id, card.id, state);
+    if (id) await services.flashcards.mark(id, card.id, state, user?.id);
     goNext();
   };
   const goNext = () => {

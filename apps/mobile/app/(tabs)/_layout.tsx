@@ -39,6 +39,10 @@ export default function TabsLayout() {
         name="notes"
         options={{ title: t.notes.title, tabBarLabel: t.home.myNotes, tabBarIcon: tabIcon("notes") }}
       />
+      <Tabs.Screen
+        name="profile"
+        options={{ title: t.profile.title, tabBarLabel: t.profile.title, tabBarIcon: tabIcon("profile") }}
+      />
     </Tabs>
   );
 }

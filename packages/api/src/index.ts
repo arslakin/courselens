@@ -18,10 +18,12 @@ import type {
   Locale,
   Note,
   Podcast,
+  ProgressSummary,
   Quiz,
   QuizResult,
   Source,
   SourceKind,
+  StudentProfile,
   StudySet,
   Transcript,
   User,
@@ -31,6 +33,20 @@ export interface AuthService {
   getCurrentUser(): Promise<User | null>;
   signIn(email: string, displayName?: string): Promise<User>;
   signOut(): Promise<void>;
+}
+
+/** Benim Alanım — the student's own profile + preferences. */
+export interface ProfileService {
+  /** Returns the profile with defaults applied (never null for a signed-in user). */
+  get(userId: Id): Promise<StudentProfile>;
+  update(userId: Id, patch: Partial<StudentProfile>): Promise<StudentProfile>;
+  /** Update the display name on the account. */
+  setDisplayName(userId: Id, displayName: string): Promise<User>;
+}
+
+/** İlerlemem — derived, informational progress for one user only. */
+export interface ProgressService {
+  summary(userId: Id): Promise<ProgressSummary>;
 }
 
 export interface CourseService {
@@ -96,13 +112,29 @@ export interface StudyService {
 }
 
 export interface QuizService {
-  /** Grades a completed attempt (answers already collected in the UI). */
-  grade(quiz: Quiz, selections: Array<0 | 1 | 2 | 3>): Promise<QuizResult>;
+  /**
+   * Grades a completed attempt. When `userId` is provided, the attempt is
+   * persisted to that user's quiz history (for İlerlemem). Grading itself is
+   * pure; persistence is per-user so histories never mix.
+   */
+  grade(
+    quiz: Quiz,
+    selections: Array<0 | 1 | 2 | 3>,
+    ctx?: { userId?: Id; lessonId?: Id; courseId?: Id }
+  ): Promise<QuizResult>;
 }
 
 export interface FlashcardService {
-  /** Persists the learner-marked state of a card ("known"/"review"). */
-  mark(lessonId: Id, cardId: Id, state: Flashcard["state"]): Promise<void>;
+  /**
+   * Persists the learner-marked state of a card ("known"/"review") and records
+   * a study event for the given user (for İlerlemem).
+   */
+  mark(
+    lessonId: Id,
+    cardId: Id,
+    state: Flashcard["state"],
+    userId?: Id
+  ): Promise<void>;
 }
 
 export interface NotesService {
@@ -144,6 +176,8 @@ export interface ChatService {
 /** The full set of services the app depends on. */
 export interface Services {
   auth: AuthService;
+  profile: ProfileService;
+  progress: ProgressService;
   courses: CourseService;
   lessons: LessonService;
   sources: SourceService;

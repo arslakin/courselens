@@ -136,7 +136,13 @@ export default function QuizScreen() {
       // Grade only the questions in the current order (full run or retry set).
       const sel = order.map((qi) => (selected[qi] ?? 0) as 0 | 1 | 2 | 3);
       const subQuiz: Quiz = { id: quiz.id, questions: order.map((qi) => quiz.questions[qi]) };
-      setResult(await services.quiz.grade(subQuiz, sel));
+      setResult(
+        await services.quiz.grade(subQuiz, sel, {
+          userId: user?.id,
+          lessonId: id,
+          courseId,
+        })
+      );
     }
   };
 

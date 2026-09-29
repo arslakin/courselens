@@ -11,18 +11,23 @@ import type {
   ChatMessage,
   Course,
   Flashcard,
+  FlashcardStudyEvent,
   Id,
   Lesson,
   Note,
   Podcast,
+  ProgressSummary,
   Quiz,
+  QuizAttempt,
   QuizResult,
   Source,
   SourceKind,
+  StudentProfile,
   StudySet,
   Transcript,
   User,
 } from "@rojanda/types";
+import { DEFAULT_STUDY_PREFERENCES } from "@rojanda/types";
 import type {
   AuthService,
   ChatMode,
@@ -33,6 +38,8 @@ import type {
   LessonService,
   NotesService,
   PodcastService,
+  ProfileService,
+  ProgressService,
   QuizService,
   RecordingHandle,
   RecordingService,
@@ -60,6 +67,8 @@ const K = {
   sources: "sources",
   notes: "notes",
   chats: "chats",
+  quizAttempts: "quizAttempts",
+  flashcardEvents: "flashcardEvents",
 };
 
 export class MockAuthService implements AuthService {
@@ -247,7 +256,12 @@ export class MockStudyService implements StudyService {
 }
 
 export class MockQuizService implements QuizService {
-  async grade(quiz: Quiz, selections: Array<0 | 1 | 2 | 3>): Promise<QuizResult> {
+  constructor(private store: JsonStore) {}
+  async grade(
+    quiz: Quiz,
+    selections: Array<0 | 1 | 2 | 3>,
+    ctx?: { userId?: Id; lessonId?: Id; courseId?: Id }
+  ): Promise<QuizResult> {
     const answers = quiz.questions.map((q, i) => ({
       questionId: q.id,
       selectedIndex: selections[i],
@@ -262,7 +276,7 @@ export class MockQuizService implements QuizService {
           .map((q) => q.topic as string)
       )
     );
-    return {
+    const result: QuizResult = {
       quizId: quiz.id,
       answers,
       score,
@@ -270,14 +284,120 @@ export class MockQuizService implements QuizService {
       percentage: Math.round((score / total) * 100),
       weakTopics,
     };
+
+    // Persist an attempt to the user's own history (İlerlemem). Scoped by
+    // userId so histories never mix between users.
+    if (ctx?.userId) {
+      const attempt: QuizAttempt = {
+        id: mockId("qa"),
+        userId: ctx.userId,
+        lessonId: ctx.lessonId,
+        courseId: ctx.courseId,
+        score,
+        total,
+        percentage: result.percentage,
+        weakTopics,
+        createdAt: now(),
+      };
+      const all = await this.store.read<QuizAttempt[]>(K.quizAttempts, []);
+      await this.store.write(K.quizAttempts, [attempt, ...all]);
+    }
+    return result;
   }
 }
 
 export class MockFlashcardService implements FlashcardService {
-  async mark(_lessonId: Id, _cardId: Id, _state: Flashcard["state"]): Promise<void> {
-    // In mock mode the card state is held in lesson.study and persisted by the
-    // lesson service when the screen saves; nothing extra to do here.
-    await delay(30);
+  constructor(private store: JsonStore) {}
+  async mark(
+    lessonId: Id,
+    cardId: Id,
+    state: Flashcard["state"],
+    userId?: Id
+  ): Promise<void> {
+    await delay(20);
+    if (userId && (state === "known" || state === "review")) {
+      const event: FlashcardStudyEvent = {
+        id: mockId("fe"),
+        userId,
+        lessonId,
+        cardId,
+        state,
+        createdAt: now(),
+      };
+      const all = await this.store.read<FlashcardStudyEvent[]>(K.flashcardEvents, []);
+      await this.store.write(K.flashcardEvents, [event, ...all]);
+    }
+  }
+}
+
+export class MockProfileService implements ProfileService {
+  constructor(private store: JsonStore) {}
+  async get(_userId: Id): Promise<StudentProfile> {
+    const user = await this.store.read<User | null>(K.user, null);
+    const p = user?.profile;
+    return {
+      school: p?.school,
+      grade: p?.grade,
+      avatarColor: p?.avatarColor,
+      preferences: { ...DEFAULT_STUDY_PREFERENCES, ...(p?.preferences ?? {}) },
+    };
+  }
+  async update(userId: Id, patch: Partial<StudentProfile>): Promise<StudentProfile> {
+    const current = await this.get(userId);
+    const next: StudentProfile = {
+      ...current,
+      ...patch,
+      preferences: { ...current.preferences, ...(patch.preferences ?? {}) },
+    };
+    const user = await this.store.read<User | null>(K.user, null);
+    if (user) await this.store.write(K.user, { ...user, profile: next });
+    return next;
+  }
+  async setDisplayName(_userId: Id, displayName: string): Promise<User> {
+    const user = await this.store.read<User | null>(K.user, null);
+    const next = { ...(user as User), displayName };
+    await this.store.write(K.user, next);
+    return next;
+  }
+}
+
+export class MockProgressService implements ProgressService {
+  constructor(private store: JsonStore) {}
+  async summary(userId: Id): Promise<ProgressSummary> {
+    const [courses, lessons, attempts, fcEvents] = await Promise.all([
+      this.store.read<Course[]>(K.courses, []),
+      this.store.read<Lesson[]>(K.lessons, []),
+      this.store.read<QuizAttempt[]>(K.quizAttempts, []),
+      this.store.read<FlashcardStudyEvent[]>(K.flashcardEvents, []),
+    ]);
+    // Everything scoped strictly to this user.
+    const myCourses = courses.filter((c) => c.userId === userId);
+    const myLessons = lessons.filter((l) => l.userId === userId);
+    const myAttempts = attempts
+      .filter((a) => a.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const myFc = fcEvents.filter((e) => e.userId === userId);
+
+    const avg =
+      myAttempts.length === 0
+        ? null
+        : Math.round(myAttempts.reduce((s, a) => s + a.percentage, 0) / myAttempts.length);
+
+    // Difficult concepts = most frequent weak topics across attempts.
+    const counts = new Map<string, number>();
+    for (const a of myAttempts) for (const t of a.weakTopics) counts.set(t, (counts.get(t) ?? 0) + 1);
+    const difficultConcepts = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([t]) => t);
+
+    return {
+      coursesCount: myCourses.length,
+      lessonsReady: myLessons.filter((l) => l.status === "ready").length,
+      flashcardsStudied: myFc.length,
+      quizAttempts: myAttempts,
+      averageQuizPercentage: avg,
+      difficultConcepts,
+    };
   }
 }
 
@@ -416,6 +536,8 @@ export async function clearAllLocalData(kv: KeyValueStore): Promise<void> {
     store.write(K.lessons, []),
     store.write(K.sources, []),
     store.write(K.notes, []),
+    store.write(K.quizAttempts, []),
+    store.write(K.flashcardEvents, []),
   ]);
 }
 
@@ -424,6 +546,8 @@ export function createMockServices(kv: KeyValueStore = new MemoryStore()): Servi
   const store = new JsonStore(kv);
   return {
     auth: new MockAuthService(store),
+    profile: new MockProfileService(store),
+    progress: new MockProgressService(store),
     courses: new MockCourseService(store),
     lessons: new MockLessonService(store),
     sources: new MockSourceService(store),
@@ -431,8 +555,8 @@ export function createMockServices(kv: KeyValueStore = new MemoryStore()): Servi
     recording: new MockRecordingService(),
     transcription: new MockTranscriptionService(),
     study: new MockStudyService(),
-    quiz: new MockQuizService(),
-    flashcards: new MockFlashcardService(),
+    quiz: new MockQuizService(store),
+    flashcards: new MockFlashcardService(store),
     notes: new MockNotesService(store),
     podcast: new MockPodcastService(),
     chat: new MockChatService(store),
