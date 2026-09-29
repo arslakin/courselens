@@ -42,3 +42,16 @@ scratch/
 
 # SAM CLI local install venv (dev tooling)
 .sam-venv/
+
+# Node / RojAnda monorepo
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+.expo/
+**/.expo/
+web-build/
+coverage/
+npm-debug.log*
+yarn-error.log*
