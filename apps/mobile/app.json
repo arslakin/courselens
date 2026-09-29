@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "RojAnda",
+    "slug": "rojanda",
+    "scheme": "rojanda",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1115",
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true },
+    "android": {
+      "adaptiveIcon": { "backgroundColor": "#0f1115" }
+    },
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": false }
+  }
+}
