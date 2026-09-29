@@ -1,37 +1,47 @@
 /**
  * RojAnda design tokens.
  *
- * BRAND-COLOR PROVENANCE (important):
- * The palette below is adapted DIRECTLY from the shipped RojLearn web app
- * (frontend/styles.css of RojLearn v1) so the mobile app keeps RojLearn's
- * clean, calm visual language.
+ * THEME: modern LIGHT theme — a bright, calm surface suitable for students.
+ * A soft warm off-white background separates from white cards; text is a dark
+ * charcoal/navy; the RojAnda blue accent carries actions and selection state.
+ * All screens consume these tokens (no hardcoded colors), so the theme is
+ * defined here once and applies app-wide.
  *
+ * BRAND-COLOR PROVENANCE (important):
  * The official "Roj Collective" brand palette could NOT be verified from any
  * asset in this repository (there is no brand/style-guide file). The accent
  * values here are therefore treated as TEMPORARY and are marked as such below.
- * Replace `colors.accent` / `colors.accent2` (and any brand-specific values)
- * once the official Roj Collective colors are provided. Do not guess brand
- * colors elsewhere — always reference these tokens.
+ * Replace `colors.accent` / `colors.accent2` once the official Roj Collective
+ * colors are provided. Do not guess brand colors elsewhere — always reference
+ * these tokens.
+ *
+ * CONTRAST (WCAG AA, normal text needs >= 4.5:1):
+ *  - text #1f2733 on bg #f6f7f9  ~= 13.5:1
+ *  - text #1f2733 on surface #ffffff ~= 14.9:1
+ *  - muted #5b6472 on surface #ffffff ~= 5.6:1
+ *  - onAccent #ffffff on accent #2f6bf0 ~= 4.8:1
+ * Full validation still requires manual testing with assistive technologies.
  */
 
 export const colors = {
-  // Verified from RojLearn v1 (frontend/styles.css) — reused as-is.
-  bg: "#0f1115",
-  surface: "#181b22",
-  surface2: "#20242e",
-  border: "#2c313c",
-  text: "#e7e9ee",
-  muted: "#9aa3b2",
-  good: "#46c993",
-  danger: "#ff6b6b",
+  // Soft, warm off-white background (not harsh pure white) with white cards.
+  bg: "#f6f7f9",
+  surface: "#ffffff",
+  surface2: "#eef1f5", // subtle light surface for inputs / secondary buttons / chips
+  border: "#dfe3ea", // subtle light-gray dividers/borders
+  text: "#1f2733", // dark charcoal/navy primary text
+  muted: "#5b6472", // medium gray secondary text (AA on white)
+  good: "#1a9d6b", // darkened for contrast on light surfaces
+  danger: "#d64545", // darkened for contrast on light surfaces
 
-  // TEMPORARY brand accents — from RojLearn UI, NOT confirmed Roj Collective
-  // brand colors. Replace when official brand palette is provided.
-  accent: "#5b8cff", // TEMP
-  accent2: "#7c5cff", // TEMP
+  // TEMPORARY brand accent — RojAnda blue, darkened slightly from the previous
+  // #5b8cff so white text on it clears WCAG AA. NOT confirmed Roj Collective
+  // brand color; replace when the official brand palette is provided.
+  accent: "#2f6bf0", // TEMP (RojAnda blue)
+  accent2: "#6d4be0", // TEMP
 
-  // Convenience on-accent text color (from RojLearn .primary button).
-  onAccent: "#0b0e14",
+  // Text/glyph color placed on top of the accent (primary buttons, avatar).
+  onAccent: "#ffffff",
 } as const;
 
 /** True when a color is a placeholder pending official brand confirmation. */

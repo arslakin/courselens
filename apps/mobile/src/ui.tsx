@@ -243,6 +243,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.lg,
     gap: spacing.sm,
+    // Subtle elevation so white cards lift off the warm off-white background.
+    shadowColor: "#0f1a2e",
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   pressed: { opacity: 0.7 },
   title: { color: colors.text, fontSize: fontSize.xl, fontWeight: fontWeight.bold },

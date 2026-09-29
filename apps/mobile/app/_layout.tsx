@@ -11,7 +11,8 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ServicesProvider>
         <AppProvider>
-          <StatusBar style="light" />
+          {/* Dark status-bar content for the light theme. */}
+          <StatusBar style="dark" />
           <Stack
             screenOptions={{
               headerStyle: { backgroundColor: colors.bg },
