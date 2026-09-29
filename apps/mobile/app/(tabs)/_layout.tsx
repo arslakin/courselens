@@ -1,12 +1,12 @@
 import React from "react";
-import { Text } from "react-native";
+import { Text, type ColorValue } from "react-native";
 import { Tabs } from "expo-router";
 import { colors } from "@rojanda/design";
 import { getStrings } from "@rojanda/i18n";
 
 const t = getStrings("tr");
 
-function TabIcon({ emoji, color }: { emoji: string; color: string }) {
+function TabIcon({ emoji, color }: { emoji: string; color: ColorValue }) {
   return <Text style={{ fontSize: 20, color }}>{emoji}</Text>;
 }
 

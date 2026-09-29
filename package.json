@@ -16,6 +16,12 @@
     "@types/jest": "^29.5.12",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.5",
-    "typescript": "^5.4.5"
+    "typescript": "~6.0.3"
+  },
+  "//overrides": "Pin a single copy of React/React Native (Expo SDK 57 versions) across the monorepo so transitive peers resolve to one version and native modules are not duplicated.",
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3"
   }
 }
