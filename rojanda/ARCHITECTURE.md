@@ -2,6 +2,15 @@
 
 Planning only. No AWS resources created; the live RojLearn app is untouched.
 
+> **SUPERSEDED WHERE IN CONFLICT (identity/backend):** production account,
+> authentication, DynamoDB, S3-ownership, transcription-migration, and the AI
+> study coach (now named **Rojber**) decisions are defined authoritatively in
+> `rojanda/PRODUCTION_PHASE1_PLAN.md`. In particular: identity is the **Cognito
+> User Pool `sub`** with a **JWT authorizer** (the Cognito **Identity Pool is
+> removed** from the MVP), storage is a **single DynamoDB table `rojanda-app`**
+> keyed by `OWNER#<sub>`, and S3 keys are prefixed `owners/<sub>/…`. Where this
+> older document says otherwise, the Phase 1 plan wins.
+
 ## Confirmed product decisions (locked for implementation)
 
 1. **Flashcards are in the first MVP** (generated alongside summary/concepts/
