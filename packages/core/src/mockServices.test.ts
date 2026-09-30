@@ -121,7 +121,15 @@ describe("processRecordedLesson pipeline", () => {
     );
 
     expect(awaitingTranscription).toBe(false);
-    expect(statuses).toEqual(["uploaded", "transcribing", "transcribed", "analyzing", "ready"]);
+    // Recording is persisted FIRST (awaiting_transcription) before transcription
+    // is attempted, so a failed transcription can never lose the recording.
+    expect(statuses).toEqual([
+      "awaiting_transcription",
+      "transcribing",
+      "transcribed",
+      "analyzing",
+      "ready",
+    ]);
     expect(study!.summary.length).toBeGreaterThan(0);
     expect(study!.quiz.questions.length).toBe(10);
     expect(study!.flashcards.length).toBeGreaterThan(0);
@@ -150,7 +158,7 @@ describe("processRecordedLesson pipeline", () => {
 
     expect(awaitingTranscription).toBe(true);
     expect(study).toBeUndefined();
-    expect(statuses).toEqual(["uploaded", "transcribing", "awaiting_transcription"]);
+    expect(statuses).toEqual(["awaiting_transcription", "transcribing", "awaiting_transcription"]);
 
     const stored = await s.lessons.get(lesson.id);
     expect(stored?.status).toBe("awaiting_transcription");
@@ -164,6 +172,91 @@ describe("processRecordedLesson pipeline", () => {
     expect(sources[0].uri).toBe("file:///rec.m4a");
     expect(sources[0].extractedText).toBeUndefined();
     expect(sources[0].userId).toBe(user.id);
+  });
+
+  it("preserves the recording and moves to transcription_failed when transcription throws", async () => {
+    // Transcription service that always fails (e.g. backend/Transcribe error).
+    const s = createMockServices();
+    s.transcription = {
+      async transcribeLesson() {
+        throw new Error("transcription-failed: bad media");
+      },
+      async transcribeVoiceNote() {
+        return null;
+      },
+    };
+    const user = await s.auth.signIn("a@b.co");
+    const course = await s.courses.create(user.id, "Biyoloji");
+    const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
+
+    const statuses: string[] = [];
+    let errCalled = false;
+    const result = await processRecordedLesson(s, lesson.id, "file:///rec.m4a", 90, {
+      onStatus: (st) => statuses.push(st),
+      onTranscriptionError: () => {
+        errCalled = true;
+      },
+    });
+
+    // Did NOT throw; reports transcriptionFailed and leaves a retryable state.
+    expect(result.transcriptionFailed).toBe(true);
+    expect(errCalled).toBe(true);
+    expect(statuses).toEqual(["awaiting_transcription", "transcribing", "transcription_failed"]);
+
+    const stored = await s.lessons.get(lesson.id);
+    expect(stored?.status).toBe("transcription_failed");
+
+    // CRUCIAL: the recording is preserved + playable despite the failure.
+    const sources = await s.sources.listByLesson(lesson.id);
+    expect(sources.length).toBe(1);
+    expect(sources[0].kind).toBe("recording");
+    expect(sources[0].uri).toBe("file:///rec.m4a");
+  });
+
+  it("first attempt does NOT request resume; retry DOES (no duplicate job on retry)", async () => {
+    const s = createMockServices();
+    const seen: Array<boolean | undefined> = [];
+    s.transcription = {
+      async transcribeLesson(lessonId, _uri, ctx) {
+        seen.push(ctx?.resumeExisting);
+        return { id: "t", lessonId, text: "", language: "tr-TR", editedByUser: false, pending: true };
+      },
+      async transcribeVoiceNote() {
+        return null;
+      },
+    };
+    const user = await s.auth.signIn("a@b.co");
+    const course = await s.courses.create(user.id, "Biyoloji");
+    const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
+    await processRecordedLesson(s, lesson.id, "file:///rec.m4a", 30);
+    const { retryLessonTranscription } = await import("./pipeline");
+    await retryLessonTranscription(s, lesson.id, "file:///rec.m4a");
+    expect(seen).toEqual([undefined, true]);
+  });
+
+  it("retryLessonTranscription completes without re-recording (reuses saved audio)", async () => {
+    const s = withMockTranscription(); // deterministic real transcript
+    const user = await s.auth.signIn("a@b.co");
+    const course = await s.courses.create(user.id, "Biyoloji");
+    const lesson = await s.lessons.create(course.id, user.id, "Fotosentez");
+
+    // Simulate a prior failed attempt: recording already saved, status failed.
+    await s.sources.add(lesson.id, user.id, "recording", { uri: "file:///rec.m4a" });
+    await s.lessons.update(lesson.id, { status: "transcription_failed" });
+
+    const { retryLessonTranscription } = await import("./pipeline");
+    const statuses: string[] = [];
+    const result = await retryLessonTranscription(s, lesson.id, "file:///rec.m4a", {
+      onStatus: (st) => statuses.push(st),
+    });
+
+    expect(result.awaitingTranscription).toBe(false);
+    expect(result.transcriptionFailed).toBeFalsy();
+    expect(statuses).toEqual(["transcribing", "transcribed", "analyzing", "ready"]);
+    const stored = await s.lessons.get(lesson.id);
+    expect(stored?.status).toBe("ready");
+    // Still exactly one recording (retry did not duplicate it).
+    expect((await s.sources.listByLesson(lesson.id)).filter((x) => x.kind === "recording").length).toBe(1);
   });
 });
 

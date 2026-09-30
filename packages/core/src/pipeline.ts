@@ -18,6 +18,8 @@ import type { Services } from "@rojanda/api";
 
 export interface ProcessCallbacks {
   onStatus?: (status: Lesson["status"]) => void;
+  /** Called when a transcription ATTEMPT fails (recording is still preserved). */
+  onTranscriptionError?: (error: Error) => void;
 }
 
 export interface ProcessRecordedResult {
@@ -25,6 +27,8 @@ export interface ProcessRecordedResult {
   study?: StudySet;
   /** True when we stopped at awaiting_transcription (no transcript yet). */
   awaitingTranscription: boolean;
+  /** True when a transcription attempt failed; the recording is preserved. */
+  transcriptionFailed?: boolean;
 }
 
 export async function processRecordedLesson(
@@ -32,7 +36,14 @@ export async function processRecordedLesson(
   lessonId: Id,
   audioUri: string,
   durationSec: number,
-  cb: ProcessCallbacks = {}
+  cb: ProcessCallbacks = {},
+  /**
+   * Authoritative owner id for filing the local recording source. Pass the
+   * signed-in user id (Cognito sub). Needed because API-backed lessons return
+   * a blanked `userId` (ownership is server-enforced), so deriving the owner
+   * from the fetched lesson would misfile the source under an empty id.
+   */
+  owner?: Id
 ): Promise<ProcessRecordedResult> {
   const setStatus = async (status: Lesson["status"]) => {
     cb.onStatus?.(status);
@@ -40,31 +51,108 @@ export async function processRecordedLesson(
   };
 
   await services.lessons.update(lessonId, { durationSec });
-  await setStatus("uploaded");
 
-  await setStatus("transcribing");
-  const transcript = await services.transcription.transcribeLesson(lessonId, audioUri);
+  // Fetch the lesson once: the remote transcription backend needs the courseId
+  // to scope the upload/job, and we use the lesson's userId as an owner
+  // fallback for local services.
+  const lessonForCtx = await services.lessons.get(lessonId);
+  const resolvedOwner = owner || lessonForCtx?.userId || "";
 
-  // Always preserve the audio as the student's own recording source, associated
-  // with this user + lesson. extractedText carries the transcript text (empty
-  // while pending — never fabricated).
-  const owner = (await services.lessons.get(lessonId))!.userId;
-  await services.sources.add(lessonId, owner, "recording", {
+  // -------------------------------------------------------------------------
+  // STEP 1 — PERSIST THE RECORDING FIRST (never lose a captured recording).
+  // The audio is saved as the student's own source and the lesson is marked
+  // as an available recording BEFORE any transcription is attempted. This is
+  // the durable outcome: even if transcription later fails, the recording
+  // remains visible in Ders Kayıtları and stays playable.
+  // -------------------------------------------------------------------------
+  const source = await services.sources.add(lessonId, resolvedOwner, "recording", {
     uri: audioUri,
-    extractedText: transcript.pending ? undefined : transcript.text,
   });
+  await setStatus("awaiting_transcription");
+
+  // -------------------------------------------------------------------------
+  // STEP 2 — TRANSCRIBE as a SEPARATE, failure-isolated step. A transcription
+  // failure NEVER removes the recording; it moves the lesson to a clear,
+  // retryable "transcription_failed" state and returns (does not throw), so
+  // the UI can present the saved recording + a retry affordance.
+  // -------------------------------------------------------------------------
+  cb.onStatus?.("transcribing");
+  await services.lessons.update(lessonId, { status: "transcribing" });
+
+  let transcript: Transcript;
+  try {
+    transcript = await services.transcription.transcribeLesson(lessonId, audioUri, {
+      courseId: lessonForCtx?.courseId,
+    });
+  } catch (e) {
+    const lesson = await services.lessons.update(lessonId, { status: "transcription_failed" });
+    cb.onStatus?.("transcription_failed");
+    cb.onTranscriptionError?.(e instanceof Error ? e : new Error(String(e)));
+    // Recording is preserved (source already added). Retryable, not thrown.
+    return { lesson, awaitingTranscription: false, transcriptionFailed: true };
+  }
 
   if (transcript.pending) {
-    // No transcript yet: stop honestly. Audio is saved and playable; the
-    // student can revisit and analysis will run once transcription lands.
-    const lesson = await services.lessons.update(lessonId, {
-      status: "awaiting_transcription",
-    });
+    // No transcript yet (no backend / honest pending): keep the audio,
+    // stop at awaiting_transcription. Analysis runs once a transcript exists.
+    const lesson = await services.lessons.update(lessonId, { status: "awaiting_transcription" });
     cb.onStatus?.("awaiting_transcription");
     return { lesson, awaitingTranscription: true };
   }
 
+  // Real transcript: attach it to the preserved recording source (if the
+  // source service supports text updates) and run grounded analysis.
+  if (services.sources.updateText) {
+    await services.sources.updateText(source.id, transcript.text);
+  }
   await setStatus("transcribed");
+  const result = await analyzeLessonFromTranscript(services, lessonId, transcript, cb);
+  return { ...result, awaitingTranscription: false };
+}
+
+/**
+ * Retry transcription for a lesson whose recording is already saved (e.g. after
+ * a "transcription_failed" state). Reuses the preserved audio — the student does
+ * NOT re-record. Behaves like STEP 2 of processRecordedLesson.
+ */
+export async function retryLessonTranscription(
+  services: Services,
+  lessonId: Id,
+  audioUri: string,
+  cb: ProcessCallbacks = {}
+): Promise<ProcessRecordedResult> {
+  const lesson0 = await services.lessons.get(lessonId);
+  cb.onStatus?.("transcribing");
+  await services.lessons.update(lessonId, { status: "transcribing" });
+
+  let transcript: Transcript;
+  try {
+    // Resume an existing job for this recording first (no re-upload, no new
+    // job); a new job is created only when no usable job exists.
+    transcript = await services.transcription.transcribeLesson(lessonId, audioUri, {
+      courseId: lesson0?.courseId,
+      resumeExisting: true,
+    });
+  } catch (e) {
+    const lesson = await services.lessons.update(lessonId, { status: "transcription_failed" });
+    cb.onStatus?.("transcription_failed");
+    cb.onTranscriptionError?.(e instanceof Error ? e : new Error(String(e)));
+    return { lesson, awaitingTranscription: false, transcriptionFailed: true };
+  }
+
+  if (transcript.pending) {
+    const lesson = await services.lessons.update(lessonId, { status: "awaiting_transcription" });
+    cb.onStatus?.("awaiting_transcription");
+    return { lesson, awaitingTranscription: true };
+  }
+
+  // Attach transcript to the existing recording source if we can find it.
+  if (services.sources.updateText) {
+    const recording = (await services.sources.listByLesson(lessonId)).find((s) => s.kind === "recording");
+    if (recording) await services.sources.updateText(recording.id, transcript.text);
+  }
+  await services.lessons.update(lessonId, { status: "transcribed" });
+  cb.onStatus?.("transcribed");
   const result = await analyzeLessonFromTranscript(services, lessonId, transcript, cb);
   return { ...result, awaitingTranscription: false };
 }

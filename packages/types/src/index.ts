@@ -100,6 +100,11 @@ export type LessonStatus =
   // available (no transcription backend connected). We stop here rather than
   // fabricating a transcript; analysis resumes once a transcript exists.
   | "awaiting_transcription"
+  // Audio is recorded, saved, and playable, but a transcription ATTEMPT failed
+  // (e.g. backend/Transcribe error). The recording is NEVER removed; the
+  // student can retry transcription. Distinct from "awaiting_transcription"
+  // (no attempt yet) and "failed" (terminal).
+  | "transcription_failed"
   | "analyzing"
   | "ready"
   | "failed";

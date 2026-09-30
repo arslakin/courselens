@@ -71,12 +71,21 @@ export class RemoteTranscriptionService implements TranscriptionService {
   }
 
   /** Full lecture recording -> Turkish transcript. Throws on failure so the
-   *  caller keeps the audio and can retry. */
-  async transcribeLesson(_lessonId: Id, audioUri: string): Promise<Transcript> {
-    const { text, confidenceAvg } = await this.runJob(audioUri);
+   *  caller keeps the audio and can retry.
+   *
+   *  The backend scopes the upload + job to the owner's course + lesson, so it
+   *  REQUIRES courseId + lessonId in the request bodies (server-side ownership
+   *  check). Without them the backend returns 404 "Ders bulunamadı." */
+  async transcribeLesson(
+    lessonId: Id,
+    audioUri: string,
+    ctx?: { courseId?: Id; resumeExisting?: boolean }
+  ): Promise<Transcript> {
+    const resumed = ctx?.resumeExisting ? await this.resumeExisting(ctx?.courseId, lessonId) : null;
+    const { text, confidenceAvg } = resumed ?? (await this.runJob(audioUri, ctx?.courseId, lessonId));
     return {
       id: `tr-${this.now()}`,
-      lessonId: _lessonId,
+      lessonId,
       text,
       language: "tr-TR",
       confidenceAvg: confidenceAvg ?? undefined,
@@ -87,25 +96,45 @@ export class RemoteTranscriptionService implements TranscriptionService {
 
   /** Short voice note -> Turkish text (or null if empty). Throws on failure so
    *  the student keeps the audio and may type the note / retry. */
-  async transcribeVoiceNote(audioUri: string): Promise<string | null> {
-    const { text } = await this.runJob(audioUri);
+  async transcribeVoiceNote(
+    audioUri: string,
+    ctx?: { courseId?: Id; lessonId?: Id }
+  ): Promise<string | null> {
+    const { text } = await this.runJob(audioUri, ctx?.courseId, ctx?.lessonId);
     return text.trim().length > 0 ? text : null;
   }
 
   // --- shared upload -> start -> poll pipeline (one implementation) ---------
-  private async runJob(audioUri: string): Promise<{ text: string; confidenceAvg?: number }> {
-    const audioKey = await this.upload(audioUri);
-    const jobId = await this.start(audioKey);
+  private async runJob(
+    audioUri: string,
+    courseId?: Id,
+    lessonId?: Id
+  ): Promise<{ text: string; confidenceAvg?: number }> {
+    // Fail fast with a clear message if ownership context is missing — the
+    // backend would otherwise reject with a generic 404.
+    if (!courseId || !lessonId) {
+      throw new Error("Transkripsiyon için ders/ders kaydı bilgisi eksik.");
+    }
+    const { audioKey, sourceId } = await this.upload(audioUri, courseId, lessonId);
+    const jobId = await this.start(audioKey, courseId, lessonId, sourceId);
     return this.poll(jobId);
   }
 
-  private async upload(audioUri: string): Promise<string> {
-    const res = await this.deps.request("/transcribe/upload-url", { method: "POST", body: {} });
+  private async upload(
+    audioUri: string,
+    courseId: Id,
+    lessonId: Id
+  ): Promise<{ audioKey: string; sourceId: string }> {
+    const res = await this.deps.request("/transcribe/upload-url", {
+      method: "POST",
+      body: { courseId, lessonId },
+    });
     if (!res.ok) throw new Error(this.errMsg(res, "upload-url"));
-    const { uploadUrl, fields, audioKey } = res.json as {
+    const { uploadUrl, fields, audioKey, sourceId } = res.json as {
       uploadUrl: string;
       fields: Record<string, string>;
       audioKey: string;
+      sourceId: string;
     };
 
     // Multipart POST to S3 with the signed policy fields + the file last.
@@ -119,13 +148,87 @@ export class RemoteTranscriptionService implements TranscriptionService {
       // e.g. 403 EntityTooLarge when the file exceeds content-length-range.
       throw new TranscriptionFailedError(`upload-rejected-${s3res.status}`);
     }
-    return audioKey;
+    return { audioKey, sourceId };
   }
 
-  private async start(audioKey: string): Promise<string> {
-    const res = await this.deps.request("/transcribe/start", { method: "POST", body: { audioKey } });
+  private async start(audioKey: string, courseId: Id, lessonId: Id, sourceId: string): Promise<string> {
+    const res = await this.deps.request("/transcribe/start", {
+      method: "POST",
+      body: { audioKey, courseId, lessonId, sourceId },
+    });
     if (!res.ok) throw new Error(this.errMsg(res, "start"));
     return (res.json as { jobId: string }).jobId;
+  }
+
+  /**
+   * Retry path: resume an EXISTING job for this lesson's recording instead of
+   * re-uploading + starting a new one. Candidates are the lesson's server-side
+   * recording sources that carry a jobName, newest first:
+   *  - COMPLETED   -> use its transcript (backend persists it + settles usage)
+   *  - IN_PROGRESS -> keep polling that same job
+   *  - FAILED / job gone (404/403) -> not usable; try the next candidate
+   * Returns null only when NO usable job exists (caller then starts a new one).
+   * Any other error (e.g. 502 transcript_unavailable) is thrown so the lesson
+   * stays retryable WITHOUT creating a duplicate job.
+   */
+  private async resumeExisting(
+    courseId: Id | undefined,
+    lessonId: Id
+  ): Promise<{ text: string; confidenceAvg?: number } | null> {
+    if (!courseId || !lessonId) {
+      throw new Error("Transkripsiyon için ders/ders kaydı bilgisi eksik.");
+    }
+    const res = await this.deps.request(
+      `/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}/sources`,
+      { method: "GET" }
+    );
+    if (!res.ok) throw new Error(this.errMsg(res, "sources"));
+    const sources = ((res.json && res.json.sources) || []) as Array<{
+      kind?: string;
+      jobName?: string;
+      createdAt?: string;
+    }>;
+    const candidates = sources
+      .filter((s) => s.kind === "recording" && typeof s.jobName === "string" && s.jobName)
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+    for (const c of candidates) {
+      const first = await this.statusOnce(c.jobName!);
+      if (first.state === "COMPLETED") return { text: first.text, confidenceAvg: first.confidenceAvg };
+      if (first.state === "IN_PROGRESS") return this.poll(c.jobName!);
+      // FAILED or GONE -> this job is not usable; try the next one.
+    }
+    return null;
+  }
+
+  /** One status check, classified. Throws on unexpected (non-404/403) errors. */
+  private async statusOnce(
+    jobId: string
+  ): Promise<
+    | { state: "COMPLETED"; text: string; confidenceAvg?: number }
+    | { state: "IN_PROGRESS" }
+    | { state: "FAILED"; reason: string }
+    | { state: "GONE" }
+  > {
+    const res = await this.deps.request(`/transcribe/status?jobId=${encodeURIComponent(jobId)}`, {
+      method: "GET",
+    });
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 403) return { state: "GONE" };
+      throw new Error(this.errMsg(res, "status"));
+    }
+    const s = res.json as {
+      status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+      transcript?: string;
+      confidenceAvg?: number;
+      error?: string;
+    };
+    if (s.status === "COMPLETED") {
+      // Only ever the backend's real transcript — never fabricated.
+      return { state: "COMPLETED", text: s.transcript ?? "", confidenceAvg: s.confidenceAvg };
+    }
+    if (s.status === "FAILED") return { state: "FAILED", reason: s.error ?? "unknown" };
+    return { state: "IN_PROGRESS" };
   }
 
   private async poll(jobId: string): Promise<{ text: string; confidenceAvg?: number }> {
@@ -133,24 +236,10 @@ export class RemoteTranscriptionService implements TranscriptionService {
     // First check immediately, then at intervals until terminal or timeout.
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const res = await this.deps.request(
-        `/transcribe/status?jobId=${encodeURIComponent(jobId)}`,
-        { method: "GET" }
-      );
-      if (!res.ok) throw new Error(this.errMsg(res, "status"));
-      const s = res.json as {
-        status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
-        transcript?: string;
-        confidenceAvg?: number;
-        error?: string;
-      };
-      if (s.status === "COMPLETED") {
-        // Only ever the backend's real transcript — never fabricated.
-        return { text: s.transcript ?? "", confidenceAvg: s.confidenceAvg };
-      }
-      if (s.status === "FAILED") {
-        throw new TranscriptionFailedError(s.error ?? "unknown");
-      }
+      const s = await this.statusOnce(jobId);
+      if (s.state === "COMPLETED") return { text: s.text, confidenceAvg: s.confidenceAvg };
+      if (s.state === "FAILED") throw new TranscriptionFailedError(s.reason);
+      if (s.state === "GONE") throw new TranscriptionFailedError("job-not-found");
       if (this.now() >= deadline) {
         throw new TranscriptionFailedError("timeout");
       }

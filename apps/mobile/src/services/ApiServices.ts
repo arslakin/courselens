@@ -141,6 +141,65 @@ export class ApiLessonService implements LessonService {
   }
 }
 
+// --- Transcripts (server-persisted; read-only on the client) ----------------
+/**
+ * A persisted lesson transcript as returned by
+ * GET /courses/{courseId}/lessons/{lessonId}/transcripts. The backend never
+ * exposes raw S3 keys here; text is only what Amazon Transcribe produced.
+ */
+export interface LessonTranscript {
+  sourceId: string;
+  text: string;
+  language?: string;
+  status?: string;
+  durationSeconds?: number;
+  createdAt?: string;
+}
+
+/**
+ * Reads the authoritative, server-persisted transcripts for a lesson. This is
+ * what makes a transcript visible after backend recovery or on another device,
+ * where the local recording source has no extractedText.
+ */
+export class ApiTranscriptService {
+  constructor(private api: ApiClient) {}
+
+  async listByLesson(courseId: Id, lessonId: Id): Promise<LessonTranscript[]> {
+    const r = await this.api.get<{ transcripts: any[] }>(
+      `/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}/transcripts`
+    );
+    return (r.transcripts ?? []).map(toTranscript);
+  }
+}
+
+function toTranscript(t: any): LessonTranscript {
+  return {
+    sourceId: t?.sourceId ?? "",
+    text: typeof t?.text === "string" ? t.text : "",
+    language: t?.language,
+    status: t?.status,
+    durationSeconds: typeof t?.durationSeconds === "number" ? t.durationSeconds : undefined,
+    createdAt: t?.createdAt,
+  };
+}
+
+/**
+ * Chooses the transcript text to show for a lesson: the newest READY
+ * server-persisted transcript with real text, otherwise the local recording
+ * source's text (offline/local mode), otherwise nothing. Never invents text.
+ */
+export function selectLessonTranscriptText(
+  serverTranscripts: LessonTranscript[],
+  localRecordingText?: string
+): string | undefined {
+  const usable = serverTranscripts
+    .filter((t) => (t.status === undefined || t.status === "ready") && t.text.trim().length > 0)
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  if (usable.length > 0) return usable[0].text;
+  const local = localRecordingText?.trim();
+  return local ? localRecordingText : undefined;
+}
+
 function toLesson(l: any): Lesson {
   return {
     id: l.lessonId,

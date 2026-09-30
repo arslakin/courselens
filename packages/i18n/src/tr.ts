@@ -164,6 +164,12 @@ export const tr = {
     transcriptionPending: "Otomatik yazıya dökme henüz bağlı değil",
     transcriptionPendingHint:
       "Ses kaydın güvenle saklandı. Otomatik transkript ve analiz, yazıya dökme servisi bağlandığında hazır olacak. O zamana kadar kaydını dinleyebilir ve notlarını yazabilirsin.",
+    // Transcription attempt FAILED — recording is preserved and playable; retryable.
+    transcriptionFailed: "Transkripsiyon başarısız",
+    transcriptionFailedHint:
+      "Kaydın güvenle saklandı ve dinlenebilir. Yazıya dökme bu sefer tamamlanamadı; tekrar deneyebilirsin. Kaydın kaybolmadı.",
+    retryTranscription: "Transkripsiyonu tekrar dene",
+    retrying: "Tekrar deneniyor…",
     playRecording: "Kaydı dinle",
     pausePlayback: "Duraklat",
     discardTitle: "Kayıt sürüyor",

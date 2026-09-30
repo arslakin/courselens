@@ -167,6 +167,8 @@ function statusLabel(status: Lesson["status"], t: ReturnType<typeof useApp>["t"]
     case "transcribed":
     case "uploaded":
       return t.record.processing;
+    case "transcription_failed":
+      return t.record.transcriptionFailed;
     default:
       return "Taslak";
   }

@@ -120,6 +120,12 @@ export interface SourceService {
     kind: SourceKind,
     data: { uri?: string; mime?: string; extractedText?: string }
   ): Promise<Source>;
+  /**
+   * Attach/overwrite the extracted text of an existing source (e.g. once a
+   * transcript arrives). Optional so lightweight implementations may omit it;
+   * the pipeline degrades gracefully when absent.
+   */
+  updateText?(sourceId: Id, extractedText: string): Promise<void>;
 }
 
 /** Requests a place to store a binary (S3 presigned PUT later; local now). */
@@ -150,14 +156,34 @@ export interface RecordingService {
  * (empty text, `pending: true`) rather than fabricating content. When the
  * backend exists, swap in a real implementation without changing callers.
  */
+/**
+ * Ownership context a real, server-backed transcription implementation needs to
+ * scope the upload/job to the authenticated owner's course + lesson. Optional
+ * so local/mock implementations (which ignore it) keep the same call sites.
+ */
+export interface TranscriptionContext {
+  courseId?: Id;
+  /**
+   * Retry semantics: first try to RESUME an existing transcription job for
+   * this lesson's recording (poll it / fetch its completed transcript) and only
+   * upload + start a new job when no usable job exists. Never re-uploads audio
+   * that already has a usable job.
+   */
+  resumeExisting?: boolean;
+}
+
 export interface TranscriptionService {
-  /** Full lecture recording -> transcript (async in real impl). */
-  transcribeLesson(lessonId: Id, audioUri: string): Promise<Transcript>;
+  /**
+   * Full lecture recording -> transcript (async in real impl).
+   * `ctx.courseId` is required by the remote backend to authorize + scope the
+   * upload to the owner's course+lesson; local/mock impls ignore it.
+   */
+  transcribeLesson(lessonId: Id, audioUri: string, ctx?: TranscriptionContext): Promise<Transcript>;
   /**
    * Short spoken note -> text. Returns `null` when automatic transcription is
    * not available yet (never fabricated); the student can type the text.
    */
-  transcribeVoiceNote(audioUri: string): Promise<string | null>;
+  transcribeVoiceNote(audioUri: string, ctx?: TranscriptionContext & { lessonId?: Id }): Promise<string | null>;
 }
 
 /** Generates the grounded study set from a lesson's own material. */

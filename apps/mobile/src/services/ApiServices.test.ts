@@ -4,7 +4,13 @@
  * routes and never send an ownerId as authorization.
  */
 import { createApiClient, NotAuthenticatedError } from "./apiClient";
-import { ApiCourseService, ApiLessonService, ApiProfileService } from "./ApiServices";
+import {
+  ApiCourseService,
+  ApiLessonService,
+  ApiProfileService,
+  ApiTranscriptService,
+  selectLessonTranscriptText,
+} from "./ApiServices";
 
 describe("createApiClient", () => {
   const mockFetch = jest.fn();
@@ -78,5 +84,87 @@ describe("createApiClient", () => {
     });
     const api = createApiClient("https://api.example.com", async () => "jwt");
     await expect(new ApiCourseService(api).get("course_x")).resolves.toBeNull();
+  });
+});
+
+describe("ApiTranscriptService (server-persisted lesson transcripts)", () => {
+  const mockFetch = jest.fn();
+  beforeEach(() => {
+    (global as any).fetch = mockFetch;
+    mockFetch.mockReset();
+  });
+
+  it("GETs the authenticated nested transcripts route with the Bearer JWT and maps results", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        transcripts: [
+          {
+            sourceId: "src_1",
+            jobName: "rojanda-x",
+            text: "Bu dersi kaydediyorum",
+            language: "tr-TR",
+            status: "ready",
+            durationSeconds: 6.21,
+            createdAt: "2026-09-30T19:40:34Z",
+          },
+        ],
+      }),
+    });
+    const api = createApiClient("https://api.example.com", async () => "jwt-t");
+    const trs = await new ApiTranscriptService(api).listByLesson("course_1", "lesson_1");
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.example.com/courses/course_1/lessons/lesson_1/transcripts");
+    expect(init.method).toBe("GET");
+    expect(init.headers.Authorization).toBe("Bearer jwt-t");
+    expect(init.body).toBeUndefined();
+    expect(trs).toEqual([
+      {
+        sourceId: "src_1",
+        text: "Bu dersi kaydediyorum",
+        language: "tr-TR",
+        status: "ready",
+        durationSeconds: 6.21,
+        createdAt: "2026-09-30T19:40:34Z",
+      },
+    ]);
+  });
+
+  it("fails closed without a session (no request sent)", async () => {
+    const api = createApiClient("https://api.example.com", async () => null);
+    await expect(new ApiTranscriptService(api).listByLesson("c", "l")).rejects.toBeInstanceOf(NotAuthenticatedError);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty list when the lesson has no transcripts yet", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ transcripts: [] }) });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    await expect(new ApiTranscriptService(api).listByLesson("c", "l")).resolves.toEqual([]);
+  });
+});
+
+describe("selectLessonTranscriptText", () => {
+  const tr = (text: string, createdAt: string, status = "ready") => ({ sourceId: "s", text, createdAt, status });
+
+  it("prefers the server transcript over empty local text (backend-recovered lesson)", () => {
+    expect(selectLessonTranscriptText([tr("sunucu metni", "2026-09-30T19:40:34Z")], undefined)).toBe("sunucu metni");
+  });
+
+  it("prefers the newest ready server transcript", () => {
+    expect(
+      selectLessonTranscriptText([tr("eski", "2026-09-30T18:00:00Z"), tr("yeni", "2026-09-30T19:00:00Z")], "yerel")
+    ).toBe("yeni");
+  });
+
+  it("ignores blank or non-ready server transcripts and falls back to local text", () => {
+    expect(selectLessonTranscriptText([tr("   ", "b"), tr("hazır değil", "c", "processing")], "yerel metin")).toBe(
+      "yerel metin"
+    );
+  });
+
+  it("returns undefined when nothing real exists (never invents text)", () => {
+    expect(selectLessonTranscriptText([], undefined)).toBeUndefined();
+    expect(selectLessonTranscriptText([], "  ")).toBeUndefined();
   });
 });

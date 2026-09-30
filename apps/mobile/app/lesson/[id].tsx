@@ -13,8 +13,10 @@ import {
   Screen,
   SectionTitle,
 } from "../../src/ui";
+import { retryLessonTranscription } from "@rojanda/core";
 import { useApp } from "../../src/app-context";
-import { useServices } from "../../src/services/ServicesProvider";
+import { useServices, useTranscriptService } from "../../src/services/ServicesProvider";
+import { selectLessonTranscriptText, type LessonTranscript } from "../../src/services/ApiServices";
 import { AudioPlayerButton } from "../../src/audio/AudioPlayerButton";
 
 function formatDuration(sec: number): string {
@@ -27,10 +29,13 @@ export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, user } = useApp();
   const services = useServices();
+  const transcriptService = useTranscriptService();
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [serverTranscripts, setServerTranscripts] = useState<LessonTranscript[]>([]);
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState(false);
 
   const load = useCallback(async () => {
     if (!id || !user) return;
@@ -39,11 +44,27 @@ export default function LessonScreen() {
       services.sources.listByLesson(id),
       services.notes.list(user.id, { lessonId: id }),
     ]);
+    // Server-persisted transcript text (authenticated). The local recording
+    // source keeps the playable audio; its text may be empty after a backend
+    // recovery or on another device, so the server transcript is authoritative.
+    let trs: LessonTranscript[] = [];
+    if (transcriptService && l?.courseId) {
+      try {
+        trs = await transcriptService.listByLesson(l.courseId, id);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[lesson] transcript load failed", {
+          lessonId: id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
     setLesson(l);
     setSources(srcs);
     setNotes(ns);
+    setServerTranscripts(trs);
     setLoading(false);
-  }, [id, services, user]);
+  }, [id, services, transcriptService, user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,9 +78,30 @@ export default function LessonScreen() {
   const study = lesson.study;
   const ready = lesson.status === "ready" && study;
   const recording = sources.find((s) => s.kind === "recording");
+  const transcriptText = selectLessonTranscriptText(serverTranscripts, recording?.extractedText);
   const materials = sources.filter((s) => s.kind !== "recording");
   const voiceNotes = notes.filter((n) => n.kind === "voice");
   const typedNotes = notes.filter((n) => n.kind === "typed");
+
+  const retryTranscriptionHere = async (uri: string) => {
+    if (!id) return;
+    setRetrying(true);
+    try {
+      await retryLessonTranscription(services, id, uri, {
+        onTranscriptionError: (err) =>
+          // eslint-disable-next-line no-console
+          console.warn("[lesson] retry transcription failed (recording preserved)", {
+            lessonId: id,
+            error: err.message,
+          }),
+      });
+      await load();
+    } catch (e) {
+      Alert.alert(t.record.title, e instanceof Error ? e.message : String(e));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const addToNotes = async (title: string, body: string) => {
     if (!user) return;
@@ -107,9 +149,9 @@ export default function LessonScreen() {
       )}
 
       <SectionTitle icon="summary">{t.study.transcript}</SectionTitle>
-      {recording?.extractedText ? (
+      {transcriptText ? (
         <Card>
-          <Body>{recording.extractedText}</Body>
+          <Body>{transcriptText}</Body>
         </Card>
       ) : recording ? (
         // Audio exists but transcription is not connected yet — say so honestly.
@@ -148,7 +190,22 @@ export default function LessonScreen() {
       ))}
 
       {/* ---- AI-GENERATED study content (clearly distinguished) ---- */}
-      {lesson.status === "awaiting_transcription" ? (
+      {lesson.status === "transcription_failed" ? (
+        // Recording is preserved + playable (shown above); transcription can be
+        // retried without re-recording. The recording NEVER disappears here.
+        <Card>
+          <Body>{t.record.transcriptionFailed}</Body>
+          <Muted>{t.record.transcriptionFailedHint}</Muted>
+          {recording?.uri ? (
+            <Button
+              label={retrying ? t.record.retrying : t.record.retryTranscription}
+              icon="recordLesson"
+              onPress={() => retryTranscriptionHere(recording.uri!)}
+              disabled={retrying}
+            />
+          ) : null}
+        </Card>
+      ) : lesson.status === "awaiting_transcription" ? (
         <Card>
           <Body>{t.record.transcriptionPending}</Body>
           <Muted>{t.record.transcriptionPendingHint}</Muted>

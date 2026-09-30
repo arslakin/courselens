@@ -190,6 +190,11 @@ export class MockSourceService implements SourceService {
     await this.store.write(K.sources, [source, ...(await this.all())]);
     return source;
   }
+  async updateText(sourceId: Id, extractedText: string): Promise<void> {
+    const all = await this.all();
+    const next = all.map((s) => (s.id === sourceId ? { ...s, extractedText } : s));
+    await this.store.write(K.sources, next);
+  }
 }
 
 export class MockUploadService implements UploadService {

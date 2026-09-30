@@ -63,9 +63,19 @@ export default function VoiceNoteScreen() {
     try {
       const { uri } = await handleRef.current!.stop();
       handleRef.current = null;
-      // Ask the (pending) transcription service — returns null today (no
-      // fabrication). The student can type the text instead.
-      const auto = await services.transcription.transcribeVoiceNote(uri);
+      // Ask the transcription service. With no backend it returns null (no
+      // fabrication); with the remote backend it needs course/lesson context to
+      // scope the upload. A transcription failure (including missing context)
+      // must NOT discard the recorded audio: keep it and let the student type.
+      let auto: string | null = null;
+      try {
+        auto = await services.transcription.transcribeVoiceNote(uri, {
+          courseId: params.courseId,
+          lessonId: params.lessonId,
+        });
+      } catch {
+        auto = null;
+      }
       setAudioUri(uri);
       setText(auto ?? "");
       setPhase("editing");

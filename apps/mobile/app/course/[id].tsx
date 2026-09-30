@@ -169,8 +169,14 @@ export default function CourseDetailScreen() {
           <Card key={l.id}>
             <Body>{l.title}</Body>
             <IconLabel
-              icon={l.status === "ready" ? "correct" : "podcast"}
-              label={l.status === "ready" ? t.record.ready : t.record.processing}
+              icon={l.status === "ready" ? "correct" : l.status === "transcription_failed" ? "uploadSource" : "podcast"}
+              label={
+                l.status === "ready"
+                  ? t.record.ready
+                  : l.status === "transcription_failed"
+                    ? t.record.transcriptionFailed
+                    : t.record.processing
+              }
             />
             <Row style={{ flexWrap: "wrap" }}>
               <Button label={t.courses.openCourse} onPress={() => router.push(`/lesson/${l.id}`)} />

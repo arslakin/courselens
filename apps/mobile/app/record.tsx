@@ -3,7 +3,7 @@ import { Alert, BackHandler, StyleSheet, Text, View } from "react-native";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import type { Course } from "@rojanda/types";
 import type { RecordingHandle } from "@rojanda/api";
-import { processRecordedLesson } from "@rojanda/core";
+import { processRecordedLesson, retryLessonTranscription } from "@rojanda/core";
 import { colors, fontWeight, spacing } from "@rojanda/design";
 import { Body, Button, Card, Input, Loading, Muted, Row, Screen, SectionTitle } from "../src/ui";
 import { useApp } from "../src/app-context";
@@ -33,6 +33,9 @@ export default function RecordScreen() {
   const [statusText, setStatusText] = useState("");
   const [recordedUri, setRecordedUri] = useState<string | undefined>();
   const [createdLessonId, setCreatedLessonId] = useState<string | undefined>();
+  const [transcriptionFailed, setTranscriptionFailed] = useState(false);
+  const [transcriptReady, setTranscriptReady] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const handleRef = useRef<RecordingHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -143,16 +146,74 @@ export default function RecordScreen() {
     handleRef.current = null;
     setRecordedUri(uri);
 
-    const lessonTitle = title.trim() || defaultTitle();
-    const lesson = await services.lessons.create(courseId, user.id, lessonTitle);
-    setCreatedLessonId(lesson.id);
+    // The audio is already captured on the device at `uri`. processRecordedLesson
+    // PERSISTS the recording first (visible in Ders Kayıtları) and then attempts
+    // transcription as a separate, failure-isolated step: a transcription
+    // failure does NOT throw and does NOT lose the recording.
+    try {
+      const lessonTitle = title.trim() || defaultTitle();
+      const lesson = await services.lessons.create(courseId, user.id, lessonTitle);
+      setCreatedLessonId(lesson.id);
 
-    // Preserve audio + create lesson. Stops honestly at awaiting_transcription
-    // when no transcript is available (no fabricated text).
-    await processRecordedLesson(services, lesson.id, uri, durationSec, {
-      onStatus: (s) => setStatusText(statusToText(s, t)),
-    });
-    setPhase("done");
+      const result = await processRecordedLesson(
+        services,
+        lesson.id,
+        uri,
+        durationSec,
+        {
+          onStatus: (s) => setStatusText(statusToText(s, t)),
+          onTranscriptionError: (err) =>
+            // eslint-disable-next-line no-console
+            console.warn("[record] transcription failed (recording preserved)", {
+              courseId,
+              lessonId: lesson.id,
+              error: err.message,
+            }),
+        },
+        user.id // authoritative owner (Cognito sub) for filing the local source
+      );
+      // Recording is saved regardless of transcription outcome.
+      setTranscriptionFailed(!!result.transcriptionFailed);
+      setTranscriptReady(!result.transcriptionFailed && !result.awaitingTranscription);
+      setPhase("done");
+    } catch (e) {
+      // This catch now only covers a genuine SAVE failure (creating the lesson
+      // or persisting the recording) — NOT a transcription failure. The captured
+      // file stays on the device, but the recorder handle is already released,
+      // so this screen cannot re-save it yet (known limitation).
+      const msg = e instanceof Error ? e.message : String(e);
+      // eslint-disable-next-line no-console
+      console.warn("[record] save failed", { courseId, durationSec, error: msg });
+      activeRef.current = false;
+      setPhase("recording");
+      Alert.alert(t.record.title, msg || t.record.recordError);
+    }
+  };
+
+  // Retry transcription for the just-recorded lesson WITHOUT re-recording. The
+  // preserved audio at `recordedUri` is reused. A failure again just returns to
+  // the failed state; the recording is never lost.
+  const retryTranscription = async () => {
+    if (!createdLessonId || !recordedUri) return;
+    setRetrying(true);
+    try {
+      const result = await retryLessonTranscription(services, createdLessonId, recordedUri, {
+        onStatus: (s) => setStatusText(statusToText(s, t)),
+        onTranscriptionError: (err) =>
+          // eslint-disable-next-line no-console
+          console.warn("[record] retry transcription failed (recording preserved)", {
+            lessonId: createdLessonId,
+            error: err.message,
+          }),
+      });
+      setTranscriptionFailed(!!result.transcriptionFailed);
+      setTranscriptReady(!result.transcriptionFailed && !result.awaitingTranscription);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert(t.record.title, msg || t.record.recordError);
+    } finally {
+      setRetrying(false);
+    }
   };
 
   // ---- processing (brief; saving the audio) ----
@@ -166,7 +227,7 @@ export default function RecordScreen() {
     );
   }
 
-  // ---- done: audio saved, transcription pending (honest) ----
+  // ---- done: audio saved; transcript ready, pending (honest), or failed (retryable) ----
   if (phase === "done") {
     return (
       <Screen>
@@ -181,10 +242,29 @@ export default function RecordScreen() {
           />
         </Card>
 
-        <Card>
-          <Body>{t.record.transcriptionPending}</Body>
-          <Muted>{t.record.transcriptionPendingHint}</Muted>
-        </Card>
+        {transcriptionFailed ? (
+          // Transcription attempt failed, but the recording is saved + playable.
+          <Card>
+            <Body>{t.record.transcriptionFailed}</Body>
+            <Muted>{t.record.transcriptionFailedHint}</Muted>
+            <Button
+              label={retrying ? t.record.retrying : t.record.retryTranscription}
+              icon="recordLesson"
+              onPress={retryTranscription}
+              disabled={retrying}
+            />
+          </Card>
+        ) : transcriptReady ? (
+          // Real transcript persisted and the lesson is ready.
+          <Card>
+            <Body>{t.record.ready}</Body>
+          </Card>
+        ) : (
+          <Card>
+            <Body>{t.record.transcriptionPending}</Body>
+            <Muted>{t.record.transcriptionPendingHint}</Muted>
+          </Card>
+        )}
 
         <Button
           label={t.study.openLesson}
@@ -264,8 +344,9 @@ function defaultTitle(): string {
 }
 
 function statusToText(s: string, t: ReturnType<typeof useApp>["t"]): string {
-  if (s === "transcribing") return t.record.processingHint;
+  if (s === "transcribing") return t.record.processing;
   if (s === "awaiting_transcription") return t.record.saved;
+  if (s === "transcription_failed") return t.record.transcriptionFailed;
   if (s === "analyzing") return "Analiz ediliyor…";
   if (s === "ready") return t.record.ready;
   return t.record.processing;
