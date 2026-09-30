@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { Alert, BackHandler, StyleSheet, Text, View } from "react-native";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import type { Course } from "@rojanda/types";
 import type { RecordingHandle } from "@rojanda/api";
 import { processRecordedLesson } from "@rojanda/core";
@@ -8,9 +8,18 @@ import { colors, fontWeight, spacing } from "@rojanda/design";
 import { Body, Button, Card, Input, Loading, Muted, Row, Screen, SectionTitle } from "../src/ui";
 import { useApp } from "../src/app-context";
 import { useServices } from "../src/services/ServicesProvider";
+import { PermissionDeniedError } from "../src/services/ExpoRecordingService";
+import { AudioPlayerButton } from "../src/audio/AudioPlayerButton";
 
-type Phase = "setup" | "recording" | "paused" | "processing";
+type Phase = "setup" | "recording" | "paused" | "processing" | "done";
 
+/**
+ * Dersi Kaydet — records a real lecture on the device (expo-av), preserves the
+ * audio as the student's own source, and creates/associates a lesson. Because
+ * no transcription backend is connected yet, we DO NOT fabricate a transcript:
+ * the lesson stops in an honest "awaiting transcription" state, the audio is
+ * playable, and analysis will run automatically once transcription lands.
+ */
 export default function RecordScreen() {
   const params = useLocalSearchParams<{ courseId?: string }>();
   const { t, user } = useApp();
@@ -22,9 +31,13 @@ export default function RecordScreen() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [elapsed, setElapsed] = useState(0);
   const [statusText, setStatusText] = useState("");
+  const [recordedUri, setRecordedUri] = useState<string | undefined>();
+  const [createdLessonId, setCreatedLessonId] = useState<string | undefined>();
 
   const handleRef = useRef<RecordingHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track "recording in progress" for the hardware-back guard without stale closures.
+  const activeRef = useRef(false);
 
   useEffect(() => {
     if (!user) return;
@@ -40,6 +53,20 @@ export default function RecordScreen() {
     };
   }, []);
 
+  // Prevent accidental loss of an active recording via the Android back button.
+  useFocusEffect(
+    React.useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (activeRef.current) {
+          confirmDiscard();
+          return true; // handled — block the default back
+        }
+        return false;
+      });
+      return () => sub.remove();
+    }, [])
+  );
+
   const startTimer = () => {
     timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
   };
@@ -49,10 +76,21 @@ export default function RecordScreen() {
   };
 
   const start = async () => {
-    handleRef.current = await services.recording.start();
-    setPhase("recording");
-    startTimer();
+    try {
+      handleRef.current = await services.recording.start();
+      activeRef.current = true;
+      setElapsed(0);
+      setPhase("recording");
+      startTimer();
+    } catch (e) {
+      if (e instanceof PermissionDeniedError) {
+        Alert.alert(t.record.permissionTitle, t.record.permissionDenied);
+      } else {
+        Alert.alert(t.record.permissionTitle, t.record.recordError);
+      }
+    }
   };
+
   const pause = async () => {
     await handleRef.current?.pause();
     stopTimer();
@@ -64,25 +102,96 @@ export default function RecordScreen() {
     setPhase("recording");
   };
 
+  const confirmDiscard = () => {
+    Alert.alert(t.record.discardTitle, t.record.discardMessage, [
+      { text: t.record.keepRecording, style: "cancel" },
+      {
+        text: t.record.discardConfirm,
+        style: "destructive",
+        onPress: async () => {
+          stopTimer();
+          try {
+            await handleRef.current?.stop();
+          } catch {
+            /* discard — ignore stop errors */
+          }
+          handleRef.current = null;
+          activeRef.current = false;
+          router.back();
+        },
+      },
+    ]);
+  };
+
   const finish = async () => {
     if (!user || !courseId || !handleRef.current) return;
     stopTimer();
     setPhase("processing");
-    const { uri, durationSec } = await handleRef.current.stop();
+    let uri: string;
+    let durationSec: number;
+    try {
+      const res = await handleRef.current.stop();
+      uri = res.uri;
+      durationSec = res.durationSec;
+    } catch {
+      activeRef.current = false;
+      setPhase("recording");
+      Alert.alert(t.record.permissionTitle, t.record.recordError);
+      return;
+    }
+    activeRef.current = false;
+    handleRef.current = null;
+    setRecordedUri(uri);
+
     const lessonTitle = title.trim() || defaultTitle();
     const lesson = await services.lessons.create(courseId, user.id, lessonTitle);
+    setCreatedLessonId(lesson.id);
+
+    // Preserve audio + create lesson. Stops honestly at awaiting_transcription
+    // when no transcript is available (no fabricated text).
     await processRecordedLesson(services, lesson.id, uri, durationSec, {
       onStatus: (s) => setStatusText(statusToText(s, t)),
     });
-    router.replace(`/lesson/${lesson.id}`);
+    setPhase("done");
   };
 
+  // ---- processing (brief; saving the audio) ----
   if (phase === "processing") {
     return (
       <Screen scroll={false} contentStyle={{ flex: 1, justifyContent: "center" }}>
         <Stack.Screen options={{ title: t.record.title }} />
         <Loading label={statusText || t.record.processing} />
         <Muted>{t.record.processingHint}</Muted>
+      </Screen>
+    );
+  }
+
+  // ---- done: audio saved, transcription pending (honest) ----
+  if (phase === "done") {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: t.record.title }} />
+        <SectionTitle icon="recordLesson">{t.record.saved}</SectionTitle>
+        <Card>
+          <Body>{formatTime(elapsed)}</Body>
+          <AudioPlayerButton
+            uri={recordedUri}
+            playLabel={t.record.playRecording}
+            pauseLabel={t.record.pausePlayback}
+          />
+        </Card>
+
+        <Card>
+          <Body>{t.record.transcriptionPending}</Body>
+          <Muted>{t.record.transcriptionPendingHint}</Muted>
+        </Card>
+
+        <Button
+          label={t.study.openLesson}
+          icon="next"
+          variant="primary"
+          onPress={() => createdLessonId && router.replace(`/lesson/${createdLessonId}`)}
+        />
       </Screen>
     );
   }
@@ -136,12 +245,13 @@ export default function RecordScreen() {
           <Body muted>{phase === "recording" ? t.record.recording : t.record.paused}</Body>
           <Row>
             {phase === "recording" ? (
-              <Button label={t.record.pause} onPress={pause} />
+              <Button label={t.record.pause} icon="pause" onPress={pause} />
             ) : (
-              <Button label={t.record.resume} onPress={resume} />
+              <Button label={t.record.resume} icon="play" onPress={resume} />
             )}
             <Button label={t.record.finish} variant="good" onPress={finish} />
           </Row>
+          <Button label={t.record.discardConfirm} variant="danger" onPress={confirmDiscard} />
         </View>
       )}
     </Screen>
@@ -154,7 +264,8 @@ function defaultTitle(): string {
 }
 
 function statusToText(s: string, t: ReturnType<typeof useApp>["t"]): string {
-  if (s === "transcribing") return "Metne dönüştürülüyor…";
+  if (s === "transcribing") return t.record.processingHint;
+  if (s === "awaiting_transcription") return t.record.saved;
   if (s === "analyzing") return "Analiz ediliyor…";
   if (s === "ready") return t.record.ready;
   return t.record.processing;

@@ -15,6 +15,13 @@ import {
 } from "../../src/ui";
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
+import { AudioPlayerButton } from "../../src/audio/AudioPlayerButton";
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m > 0 ? `${m} dk ${s} sn` : `${s} sn`;
+}
 
 export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -88,7 +95,12 @@ export default function LessonScreen() {
       {recording ? (
         <Card>
           <IconLabel icon="recordLesson" label={t.study.recording} />
-          {lesson.durationSec ? <Muted>{Math.round(lesson.durationSec)}s</Muted> : null}
+          {lesson.durationSec ? <Muted>{formatDuration(lesson.durationSec)}</Muted> : null}
+          <AudioPlayerButton
+            uri={recording.uri}
+            playLabel={t.study.playRecording}
+            pauseLabel={t.study.pausePlayback}
+          />
         </Card>
       ) : (
         <Muted>{t.courseWs.empty}</Muted>
@@ -98,6 +110,12 @@ export default function LessonScreen() {
       {recording?.extractedText ? (
         <Card>
           <Body>{recording.extractedText}</Body>
+        </Card>
+      ) : recording ? (
+        // Audio exists but transcription is not connected yet — say so honestly.
+        <Card>
+          <Body>{t.study.transcriptPending}</Body>
+          <Muted>{t.study.transcriptPendingHint}</Muted>
         </Card>
       ) : (
         <Muted>{t.courseWs.empty}</Muted>
@@ -130,7 +148,12 @@ export default function LessonScreen() {
       ))}
 
       {/* ---- AI-GENERATED study content (clearly distinguished) ---- */}
-      {!ready ? (
+      {lesson.status === "awaiting_transcription" ? (
+        <Card>
+          <Body>{t.record.transcriptionPending}</Body>
+          <Muted>{t.record.transcriptionPendingHint}</Muted>
+        </Card>
+      ) : !ready ? (
         <Card>
           <Body>{t.record.processing}</Body>
           <Muted>{t.record.processingHint}</Muted>

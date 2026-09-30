@@ -126,11 +126,26 @@ export const tr = {
     recording: "Kaydediliyor…",
     paused: "Duraklatıldı",
     processing: "İşleniyor…",
-    processingHint: "Ders metne dönüştürülüyor ve analiz ediliyor",
+    processingHint: "Kayıt kaydediliyor",
     ready: "Ders hazır",
     lessonTitle: "Ders başlığı",
     consentNote:
       "Kayıt yapmadan önce izin aldığından emin ol. Kayıtların yalnızca sana özeldir.",
+    permissionTitle: "Mikrofon izni gerekli",
+    permissionDenied:
+      "Kayıt için mikrofon izni verilmedi. Ayarlar’dan izni açıp tekrar deneyebilirsin.",
+    recordError: "Kayıt başlatılamadı. Lütfen tekrar dene.",
+    saved: "Kayıt kaydedildi",
+    // Honest pending-transcription state (no AWS transcription connected yet).
+    transcriptionPending: "Otomatik yazıya dökme henüz bağlı değil",
+    transcriptionPendingHint:
+      "Ses kaydın güvenle saklandı. Otomatik transkript ve analiz, yazıya dökme servisi bağlandığında hazır olacak. O zamana kadar kaydını dinleyebilir ve notlarını yazabilirsin.",
+    playRecording: "Kaydı dinle",
+    pausePlayback: "Duraklat",
+    discardTitle: "Kayıt sürüyor",
+    discardMessage: "Devam eden kaydın var. Çıkarsan kayıt kaybolur. Yine de çıkılsın mı?",
+    discardConfirm: "Kaydı sil ve çık",
+    keepRecording: "Kayda devam et",
   },
 
   study: {
@@ -152,6 +167,12 @@ export const tr = {
     generatedByAI: "RojAnda tarafından üretildi",
     sourceVsGenerated:
       "Aşağıdaki içerik senin kaynaklarından üretildi. Açıklamalar RojAnda tarafından sadeleştirildi.",
+    openLesson: "Dersi aç",
+    transcriptPending: "Transkript henüz hazır değil",
+    transcriptPendingHint:
+      "Otomatik yazıya dökme servisi bağlandığında transkript ve analiz burada görünecek. Kaydını dinleyebilirsin.",
+    playRecording: "Kaydı dinle",
+    pausePlayback: "Duraklat",
   },
 
   courseWs: {
