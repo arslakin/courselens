@@ -31,7 +31,9 @@ Security-critical rules:
 from __future__ import annotations
 
 import json
-import urllib.request
+import logging
+import re
+from urllib.parse import unquote, urlparse
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -58,6 +60,11 @@ from .core import (
 # S3's OWN server-side signing — not client API auth (which is the JWT).
 _s3 = boto3.client("s3", config=BotoConfig(signature_version="s3v4"))
 _transcribe = boto3.client("transcribe")
+
+# CloudWatch logging. Log lines carry route + error type only — never request
+# bodies, JWTs, presigned URLs, or transcript text.
+logger = logging.getLogger("rojanda")
+logger.setLevel(logging.INFO)
 
 
 def _dynamodb():
@@ -267,10 +274,88 @@ def _start(cfg: Config, owner_id: str, body: dict) -> dict:
     return {"jobId": job_name, "status": "IN_PROGRESS", "sourceId": source_id or job_name}
 
 
-def _fetch_transcript_output(uri: str) -> tuple[str, float | None, list]:
-    with urllib.request.urlopen(uri, timeout=10) as resp:  # nosec - AWS-signed URL
-        data = json.loads(resp.read().decode("utf-8"))
-    results = data.get("results") or {}
+_TRANSCRIPT_UNAVAILABLE = ("transcript_unavailable", "Transkript alınamadı. Lütfen tekrar deneyin.")
+
+
+def _source_for_job(owner_id: str, job_name: str) -> dict | None:
+    """The owner's SOURCE row that started `job_name` (links audio/course/lesson)."""
+    for s in store.query_prefix(owner_id, "SOURCE#"):
+        if s.get("jobName") == job_name:
+            return s
+    return None
+
+
+def _parse_s3_uri(uri: str) -> tuple[str, str] | None:
+    """Parse bucket/key from the URI forms Transcribe returns. None if unknown.
+
+      https://s3.<region>.amazonaws.com/<bucket>/<key>   (path-style; observed)
+      https://s3.amazonaws.com/<bucket>/<key>
+      https://<bucket>.s3.<region>.amazonaws.com/<key>   (virtual-hosted)
+      https://<bucket>.s3.amazonaws.com/<key>
+      s3://<bucket>/<key>
+    """
+    if not isinstance(uri, str) or not uri:
+        return None
+    p = urlparse(uri)
+    host = (p.netloc or "").lower()
+    path = unquote(p.path or "").lstrip("/")
+    if p.scheme == "s3":
+        bucket, key = host, path
+    elif p.scheme == "https" and re.fullmatch(r"s3([.-][a-z0-9-]+)?\.amazonaws\.com", host):
+        bucket, _, key = path.partition("/")
+    elif p.scheme == "https":
+        m = re.fullmatch(r"([a-z0-9.-]+)\.s3([.-][a-z0-9-]+)?\.amazonaws\.com", host)
+        if not m:
+            return None
+        bucket, key = m.group(1), path
+    else:
+        return None
+    return (bucket, key) if bucket and key else None
+
+
+def _transcript_location(cfg: Config, owner_id: str, job_name: str, job: dict, src: dict | None) -> tuple[str, str]:
+    """Where the transcript JSON lives, restricted to the caller's own prefix.
+
+    Preferred: the deterministic key we asked Transcribe to write
+    (transcript_key_for(audioKey) in our media bucket). Fallback: parse the
+    TranscriptFileUri. Either way the result must be in OUR bucket and under
+    owners/<caller sub>/ — never another bucket or another owner's data.
+    """
+    if src and src.get("audioKey"):
+        bucket, key = cfg.media_bucket, transcript_key_for(src["audioKey"])
+    else:
+        parsed = _parse_s3_uri((job.get("Transcript") or {}).get("TranscriptFileUri"))
+        if not parsed:
+            logger.warning("transcript_location_unparseable job=%s", job_name)
+            raise ClientError(502, *_TRANSCRIPT_UNAVAILABLE)
+        bucket, key = parsed
+    if bucket != cfg.media_bucket or not key.startswith(f"owners/{owner_id}/") or ".." in key:
+        logger.warning("transcript_location_rejected job=%s", job_name)
+        raise ClientError(502, *_TRANSCRIPT_UNAVAILABLE)
+    return bucket, key
+
+
+def _read_transcript_output(bucket: str, key: str, job_name: str) -> dict:
+    """Signed S3 GetObject (Lambda execution role) of the Transcribe output JSON.
+
+    Replaces the old unauthenticated urllib.urlopen(TranscriptFileUri), which
+    returns 403 for a private bucket because Transcribe gives a plain (unsigned)
+    S3 URL when OutputBucketName is set.
+    """
+    try:
+        obj = _s3.get_object(Bucket=bucket, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except BotoClientError as e:
+        code = (getattr(e, "response", None) or {}).get("Error", {}).get("Code", "unknown")
+        logger.warning("transcript_read_failed job=%s code=%s", job_name, code)
+        raise ClientError(502, *_TRANSCRIPT_UNAVAILABLE)
+    except (ValueError, UnicodeDecodeError):
+        logger.warning("transcript_parse_failed job=%s", job_name)
+        raise ClientError(502, *_TRANSCRIPT_UNAVAILABLE)
+
+
+def _parse_transcript_output(data: dict) -> tuple[str, float | None, list]:
+    results = (data or {}).get("results") or {}
     transcripts = results.get("transcripts") or []
     text = (transcripts[0].get("transcript") if transcripts else "") or ""
     all_items = results.get("items") or []
@@ -293,15 +378,9 @@ def _job_owner_ok(owner_id: str, job_name: str) -> bool:
     return job_name.startswith(f"rojanda-{frag}-")
 
 
-def _persist_transcript(owner_id: str, job_name: str, text: str, avg, duration_seconds: float) -> None:
+def _persist_transcript(owner_id: str, job_name: str, text: str, avg, duration_seconds: float, src: dict | None) -> None:
     """Persist a transcript entity linked to owner + course + lesson + source +
     job, with metadata. Provenance preserved via the source row's ids."""
-    # Find the source row for this job to recover course/lesson linkage.
-    src = None
-    for s in store.query_prefix(owner_id, "SOURCE#"):
-        if s.get("jobName") == job_name:
-            src = s
-            break
     if not src:
         return  # nothing to link (job not started via our flow) — do not fabricate
     lesson_id = src.get("lessonId", "")
@@ -350,12 +429,16 @@ def _status(cfg: Config, owner_id: str, params: dict) -> dict:
         _release_job(cfg, owner_id, job_name)
         return {"status": "FAILED", "error": job.get("FailureReason") or "transcription_failed"}
 
-    uri = (job.get("Transcript") or {}).get("TranscriptFileUri")
-    text, avg, items = _fetch_transcript_output(uri) if uri else ("", None, [])
+    # COMPLETED: read the output with the Lambda's signed S3 client. If the read
+    # fails we raise 502 BEFORE settling/persisting, so the job stays unsettled
+    # and a later poll of the SAME job can still recover (no new job needed).
+    src = _source_for_job(owner_id, job_name)
+    bucket, key = _transcript_location(cfg, owner_id, job_name, job, src)
+    text, avg, items = _parse_transcript_output(_read_transcript_output(bucket, key, job_name))
     duration_seconds = authoritative_seconds(items)
     actual_minutes = seconds_to_billable_minutes(duration_seconds)
     _settle_job(cfg, owner_id, job_name, actual_minutes, duration_seconds)
-    _persist_transcript(owner_id, job_name, text, avg, duration_seconds)
+    _persist_transcript(owner_id, job_name, text, avg, duration_seconds, src)
     return {
         "status": "COMPLETED",
         "transcript": text,
@@ -458,6 +541,13 @@ def handler(event, _context=None):
         owner_id = get_owner_id(event)  # verified sub or 401
         return _response(200, _route(cfg, owner_id, event))
     except ClientError as e:
+        if e.status >= 500:
+            method, path = _method_path(event)
+            logger.warning("request_failed method=%s path=%s status=%s code=%s", method, path, e.status, e.code)
         return _response(e.status, {"error": {"code": e.code, "message": e.message}})
-    except Exception:  # noqa: BLE001 - never leak internals
+    except Exception:  # noqa: BLE001 - never leak internals to the client
+        # Full traceback to CloudWatch (route only; no body/JWT/query values).
+        # The client still gets a safe generic message.
+        method, path = _method_path(event or {})
+        logger.exception("unhandled_error method=%s path=%s", method, path)
         return _response(500, {"error": {"code": "internal", "message": "Beklenmeyen bir hata oluştu."}})

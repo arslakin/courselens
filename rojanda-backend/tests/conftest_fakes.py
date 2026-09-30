@@ -102,11 +102,29 @@ class FakeDynamo:
         raise AssertionError("Unhandled UpdateExpression in fake: " + expr)
 
 
+class _Body:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
 class FakeS3:
     def __init__(self, size=1_000_000, missing=False):
         self._size = size
         self._missing = missing
         self.presigned_calls = []
+        # key -> bytes, served by get_object (models the signed S3 read).
+        self.objects = {}
+        self.get_calls = []
+
+    def get_object(self, Bucket, Key):
+        self.get_calls.append({"Bucket": Bucket, "Key": Key})
+        if Key not in self.objects:
+            from botocore.exceptions import ClientError as BotoClientError
+            raise BotoClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return {"Body": _Body(self.objects[Key])}
 
     def generate_presigned_post(self, Bucket, Key, Fields, Conditions, ExpiresIn):
         self.presigned_calls.append({"Bucket": Bucket, "Key": Key, "Conditions": Conditions})

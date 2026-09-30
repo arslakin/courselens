@@ -38,14 +38,17 @@ def event(method, path, sub=SUB_A, body=None, query=None, path_params=None):
     }
 
 
-def write_transcript(text, items):
-    import tempfile
+BUCKET = "rojanda-media-test"
 
+
+def write_transcript(s3, audio_key, text, items):
+    """Store a Transcribe output JSON in the fake (private) bucket at the
+    deterministic key Transcribe writes to, and return the PLAIN S3 URI that
+    Transcribe reports (unsigned; path-style) — exactly the real shape."""
+    key = core.transcript_key_for(audio_key)
     payload = {"results": {"transcripts": [{"transcript": text}], "items": items}}
-    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-    json.dump(payload, f)
-    f.close()
-    return "file://" + f.name
+    s3.objects[key] = json.dumps(payload).encode("utf-8")
+    return f"https://s3.eu-central-1.amazonaws.com/{BUCKET}/{key}"
 
 
 def timed_items(end_times, confidence="0.9"):
@@ -160,7 +163,7 @@ class TranscriptionFlowTests(Base):
         started = self.body(api.handler(event("POST", "/transcribe/start",
                             body={"audioKey": up["audioKey"], "courseId": cid, "lessonId": lid, "sourceId": up["sourceId"]})))
         self.transcribe.status = "COMPLETED"
-        self.transcribe.transcript_uri = write_transcript("Türev tanımı", timed_items([10.0, 65.4]))
+        self.transcribe.transcript_uri = write_transcript(self.s3, up["audioKey"], "Türev tanımı", timed_items([10.0, 65.4]))
         r = api.handler(event("GET", "/transcribe/status", query={"jobId": started["jobId"]}))
         b = self.body(r)
         self.assertEqual(b["status"], "COMPLETED")
@@ -197,7 +200,7 @@ class TranscriptionFlowTests(Base):
         j2 = self.body(api.handler(event("POST", "/transcribe/start",
                        body={"audioKey": up2["audioKey"], "courseId": cid, "lessonId": lid, "sourceId": up2["sourceId"]})))
         self.transcribe.status = "COMPLETED"
-        self.transcribe.transcript_uri = write_transcript("tekrar", timed_items([150.0]))
+        self.transcribe.transcript_uri = write_transcript(self.s3, up2["audioKey"], "tekrar", timed_items([150.0]))
         for _ in range(3):  # idempotent repeated polling
             api.handler(event("GET", "/transcribe/status", query={"jobId": j2["jobId"]}))
         usage = store.get(SUB_A, store.sk_usage(core.today_utc()))
@@ -224,7 +227,7 @@ class TranscriptionFlowTests(Base):
         j = self.body(api.handler(event("POST", "/transcribe/start",
                      body={"audioKey": up["audioKey"], "courseId": cid, "lessonId": lid, "sourceId": up["sourceId"]})))
         self.transcribe.status = "COMPLETED"
-        self.transcribe.transcript_uri = write_transcript(text, timed_items([30.0]))
+        self.transcribe.transcript_uri = write_transcript(self.s3, up["audioKey"], text, timed_items([30.0]))
         api.handler(event("GET", "/transcribe/status", query={"jobId": j["jobId"]}))
         return up["sourceId"]
 
@@ -250,6 +253,81 @@ class TranscriptionFlowTests(Base):
                         path_params={"courseId": cid, "lessonId": lid})))
         self.assertEqual(len(trs["transcripts"]), 1)
         self.assertEqual(trs["transcripts"][0]["text"], "ders metni")
+
+
+class TranscriptRetrievalTests(Base):
+    """Regression for the real-device bug: COMPLETED job, but the old code read
+    the plain (unsigned) TranscriptFileUri with urllib -> 403 -> generic 500."""
+
+    def _start(self):
+        cid = self.make_course()
+        lid = self.make_lesson(cid)
+        up = self.body(api.handler(event("POST", "/transcribe/upload-url", body={"courseId": cid, "lessonId": lid})))
+        j = self.body(api.handler(event("POST", "/transcribe/start",
+                     body={"audioKey": up["audioKey"], "courseId": cid, "lessonId": lid, "sourceId": up["sourceId"]})))
+        return cid, lid, up, j
+
+    def test_reads_transcript_with_signed_s3_get_at_deterministic_key(self):
+        cid, lid, up, j = self._start()
+        self.transcribe.status = "COMPLETED"
+        self.transcribe.transcript_uri = write_transcript(self.s3, up["audioKey"], "Bu dersi kaydediyorum", timed_items([6.3]))
+        r = api.handler(event("GET", "/transcribe/status", query={"jobId": j["jobId"]}))
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(self.body(r)["transcript"], "Bu dersi kaydediyorum")
+        # Signed GetObject on OUR bucket at the deterministic key.
+        self.assertEqual(self.s3.get_calls[-1], {"Bucket": BUCKET, "Key": core.transcript_key_for(up["audioKey"])})
+        self.assertEqual(len(store.query_prefix(SUB_A, store.sk_transcript_prefix(lid))), 1)
+        self.assertTrue(store.get(SUB_A, store.sk_job(j["jobId"]))["settled"])
+
+    def test_read_failure_is_502_unsettled_and_recoverable_on_same_job(self):
+        cid, lid, up, j = self._start()
+        self.transcribe.status = "COMPLETED"
+        self.transcribe.transcript_uri = f"https://s3.eu-central-1.amazonaws.com/{BUCKET}/x"  # object not present yet
+        r1 = api.handler(event("GET", "/transcribe/status", query={"jobId": j["jobId"]}))
+        self.assertEqual(r1["statusCode"], 502)
+        self.assertEqual(self.body(r1)["error"]["code"], "transcript_unavailable")
+        # Nothing persisted / settled -> still recoverable.
+        self.assertEqual(store.query_prefix(SUB_A, store.sk_transcript_prefix(lid)), [])
+        self.assertFalse(store.get(SUB_A, store.sk_job(j["jobId"]))["settled"])
+        # Output becomes readable -> SAME job recovers; no new job is started.
+        write_transcript(self.s3, up["audioKey"], "kurtarıldı", timed_items([6.0]))
+        started_before = len(self.transcribe.started)
+        r2 = api.handler(event("GET", "/transcribe/status", query={"jobId": j["jobId"]}))
+        self.assertEqual(self.body(r2)["status"], "COMPLETED")
+        self.assertEqual(self.body(r2)["transcript"], "kurtarıldı")
+        self.assertEqual(len(self.transcribe.started), started_before)
+        self.assertEqual(store.get(SUB_A, store.sk_lesson(cid, lid))["status"], "ready")
+
+    def test_uri_fallback_parses_path_and_virtual_hosted_forms(self):
+        key = f"owners/{SUB_A}/courses/c/lessons/l/transcript/s.json"
+        self.assertEqual(api._parse_s3_uri(f"https://s3.eu-central-1.amazonaws.com/{BUCKET}/{key}"), (BUCKET, key))
+        self.assertEqual(api._parse_s3_uri(f"https://{BUCKET}.s3.eu-central-1.amazonaws.com/{key}"), (BUCKET, key))
+        self.assertEqual(api._parse_s3_uri(f"s3://{BUCKET}/{key}"), (BUCKET, key))
+        self.assertIsNone(api._parse_s3_uri("https://evil.example.com/x"))
+
+    def test_uri_fallback_rejects_other_bucket_or_other_owner(self):
+        cfg = core.Config.from_env()
+        job = {"Transcript": {"TranscriptFileUri": f"https://s3.eu-central-1.amazonaws.com/other-bucket/owners/{SUB_A}/t.json"}}
+        with self.assertRaises(core.ClientError):
+            api._transcript_location(cfg, SUB_A, "rojanda-x", job, None)
+        job = {"Transcript": {"TranscriptFileUri": f"https://s3.eu-central-1.amazonaws.com/{BUCKET}/owners/{SUB_B}/t.json"}}
+        with self.assertRaises(core.ClientError):
+            api._transcript_location(cfg, SUB_A, "rojanda-x", job, None)
+
+    def test_unhandled_exception_logged_but_client_gets_generic_message(self):
+        cid, lid, up, j = self._start()
+
+        class Boom:
+            def get_transcription_job(self, **_):
+                raise RuntimeError("secret internal detail")
+
+        api._transcribe = Boom()
+        with self.assertLogs("rojanda", level="ERROR") as logs:
+            r = api.handler(event("GET", "/transcribe/status", query={"jobId": j["jobId"]}))
+        self.assertEqual(r["statusCode"], 500)
+        self.assertEqual(self.body(r)["error"]["message"], "Beklenmeyen bir hata oluştu.")
+        self.assertNotIn("secret internal detail", r["body"])
+        self.assertIn("RuntimeError", "\n".join(logs.output))
 
 
 if __name__ == "__main__":
