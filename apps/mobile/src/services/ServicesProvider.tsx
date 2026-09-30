@@ -5,6 +5,7 @@ import { asyncStore } from "./store";
 import { ANALYSIS_BASE_URL } from "../config";
 import { RemoteAnalysisBackend } from "./RemoteAnalysisBackend";
 import { ExpoRecordingService } from "./ExpoRecordingService";
+import { makeTranscription } from "./makeTranscription";
 
 /**
  * Provides the app's Services to all screens via context.
@@ -27,10 +28,14 @@ function makeBackend(): AnalysisBackend {
 export function ServicesProvider({ children }: { children: React.ReactNode }) {
   const bundle = useMemo<ServicesBundle>(() => {
     const backend = makeBackend();
-    // Inject the real device recorder; transcription stays honest/pending
-    // (default) until the RojAnda backend is connected.
+    // Inject the real device recorder. Transcription is config-gated: it stays
+    // the honest PendingTranscriptionService unless TRANSCRIBE_BASE_URL +
+    // Cognito pool are configured, in which case the real RemoteTranscription
+    // (Amazon Transcribe tr-TR) is used — same service for both Dersi Kaydet
+    // and Sesli Not, no screen changes.
     const services = createMockServices(asyncStore, backend, {
       recording: new ExpoRecordingService(),
+      transcription: makeTranscription(),
     });
     return { services, backend };
   }, []);

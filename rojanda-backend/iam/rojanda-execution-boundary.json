@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BoundaryAllowLogsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:387276719593:log-group:/aws/lambda/rojanda-*"
+    },
+    {
+      "Sid": "BoundaryAllowTranscribeBatchJobsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "transcribe:StartTranscriptionJob",
+        "transcribe:GetTranscriptionJob"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BoundaryAllowMediaBucketObjectsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::rojanda-media-387276719593/*"
+    },
+    {
+      "Sid": "BoundaryAllowUsageTableOnly",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-usage"
+    }
+  ]
+}

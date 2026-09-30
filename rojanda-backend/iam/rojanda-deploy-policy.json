@@ -1,0 +1,328 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationRojandaStacksOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResource",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:GetTemplate",
+        "cloudformation:GetTemplateSummary",
+        "cloudformation:ListStackResources",
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:us-east-1:387276719593:stack/rojanda-*/*"
+      ]
+    },
+    {
+      "Sid": "CloudFormationValidateAndListReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:ValidateTemplate",
+        "cloudformation:ListStacks",
+        "cloudformation:ListExports"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudFormationSamTransformOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
+      ]
+    },
+    {
+      "Sid": "LambdaRojandaFunctionsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:ListVersionsByFunction",
+        "lambda:PublishVersion",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:ListTags",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:GetPolicy"
+      ],
+      "Resource": [
+        "arn:aws:lambda:us-east-1:387276719593:function:rojanda-*"
+      ]
+    },
+    {
+      "Sid": "ApiGatewayV2HttpApi",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PUT",
+        "apigateway:PATCH",
+        "apigateway:DELETE"
+      ],
+      "Resource": [
+        "arn:aws:apigateway:us-east-1::/apis",
+        "arn:aws:apigateway:us-east-1::/apis/*",
+        "arn:aws:apigateway:us-east-1::/tags/*"
+      ]
+    },
+    {
+      "Sid": "RojandaStageCreationTagging",
+      "Effect": "Allow",
+      "Action": "apigateway:TagResource",
+      "Resource": "arn:aws:apigateway:us-east-1::/apis/*/stages"
+    },
+    {
+      "Sid": "IamCreateBoundedRojandaRoleOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:role/rojanda-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::387276719593:policy/rojanda-execution-boundary"
+        }
+      }
+    },
+    {
+      "Sid": "IamManageRojandaExecutionRoleOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:role/rojanda-*"
+      ]
+    },
+    {
+      "Sid": "IamManageRojandaExecutionManagedPolicyOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy",
+        "arn:aws:iam::387276719593:policy/rojanda-cognito-authenticated-policy",
+        "arn:aws:iam::387276719593:policy/rojanda-cognito-unauthenticated-policy"
+      ]
+    },
+    {
+      "Sid": "DenyAnyChangeToTheExecutionBoundaryItself",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:DeletePolicy",
+        "iam:CreatePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:policy/rojanda-execution-boundary"
+      ]
+    },
+    {
+      "Sid": "IamAttachOnlyRojandaPoliciesToRojandaRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:role/rojanda-*"
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy",
+            "arn:aws:iam::387276719593:policy/rojanda-cognito-authenticated-policy",
+            "arn:aws:iam::387276719593:policy/rojanda-cognito-unauthenticated-policy"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "IamPassRojandaLambdaRolesToLambdaOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:role/rojanda-transcribe-exec-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "IamPassRojandaCognitoRolesToCognitoOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::387276719593:role/rojanda-cognito-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "cognito-identity.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "CognitoIdentityPoolRojanda",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-identity:CreateIdentityPool",
+        "cognito-identity:DeleteIdentityPool",
+        "cognito-identity:DescribeIdentityPool",
+        "cognito-identity:UpdateIdentityPool",
+        "cognito-identity:SetIdentityPoolRoles",
+        "cognito-identity:GetIdentityPoolRoles",
+        "cognito-identity:TagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3RojandaMediaBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketVersioning",
+        "s3:PutBucketTagging",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutBucketCORS",
+        "s3:GetBucketCORS",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::rojanda-media-387276719593",
+        "arn:aws:s3:::rojanda-media-387276719593/*"
+      ]
+    },
+    {
+      "Sid": "SamManagedArtifactBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketVersioning",
+        "s3:PutBucketTagging",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-default*",
+        "arn:aws:s3:::aws-sam-cli-managed-default*/*",
+        "arn:aws:s3:::rojanda-sam-artifacts*",
+        "arn:aws:s3:::rojanda-sam-artifacts*/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDbRojandaUsageTableOnly",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:TagResource",
+        "dynamodb:ListTagsOfResource"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-usage"
+      ]
+    },
+    {
+      "Sid": "CloudWatchLogsForRojandaLambda",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-1:387276719593:log-group:/aws/lambda/rojanda-*"
+      ]
+    },
+    {
+      "Sid": "CloudWatchAlarmsAndBudgetSafeguardRojanda",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:cloudwatch:us-east-1:387276719593:alarm:rojanda-*"
+      ]
+    },
+    {
+      "Sid": "SnsCostAlarmTopicRojanda",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:ListSubscriptionsByTopic",
+        "sns:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:sns:us-east-1:387276719593:rojanda-*"
+      ]
+    }
+  ]
+}

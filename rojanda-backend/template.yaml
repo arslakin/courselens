@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  RojAnda transcription backend (isolated from the frozen RojLearn/courselens
+  stack). Real Turkish (tr-TR) speech-to-text via Amazon Transcribe (batch).
+  Flow: client gets a size-limited presigned POST -> uploads .m4a to a private,
+  per-user S3 prefix -> backend starts a Transcribe job -> client polls status
+  -> editable Turkish transcript. No AWS credentials in the client; per-user
+  isolation enforced by Cognito identity + server-derived keys. NOTHING here
+  touches courselens/RojLearn.
+
+Parameters:
+  MediaBucketName:
+    Type: String
+    Default: rojanda-media-387276719593
+  ExecutionRolePermissionsBoundaryArn:
+    Type: String
+    Description: >
+      ARN of the admin-created permissions boundary applied to the Lambda
+      execution role (rojanda-execution-boundary). Created out-of-band by an
+      admin (NOT by rojanda-deployer); caps runtime perms to Logs + Transcribe
+      start/get + S3 get/put on the media bucket + the usage table.
+  MaxAudioSeconds:
+    Type: Number
+    Default: 5400   # 90 minutes hard cap (also enforced client-side)
+  MaxUploadBytes:
+    Type: Number
+    Default: 157286400   # ~150 MB presigned POST content-length-range ceiling
+  DailyMinutesAllowancePerIdentity:
+    Type: Number
+    Default: 120   # per-Cognito-identity per-day transcription minutes allowance
+  ThrottleRateLimit:
+    Type: Number
+    Default: 5
+  ThrottleBurstLimit:
+    Type: Number
+    Default: 10
+  CostAlarmThresholdUsd:
+    Type: Number
+    Default: 25
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    Timeout: 30
+    Architectures:
+      - arm64
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Private media bucket: audio + Transcribe output. No public access.
+  # ---------------------------------------------------------------------------
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref MediaBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-raw-media-30d
+            Status: Enabled
+            Prefix: users/
+            ExpirationInDays: 30
+      CorsConfiguration:
+        # Native app has no fixed web origin; CORS is a browser control, not an
+        # auth control (auth = presigned POST signature + IAM). MUST be pinned
+        # to the RojAnda web production origin when a web app is published.
+        CorsRules:
+          - AllowedMethods: [POST, GET]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["content-type"]
+            MaxAge: 3000
+
+  MediaBucketTlsOnlyPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub arn:aws:s3:::${MediaBucketName}
+              - !Sub arn:aws:s3:::${MediaBucketName}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ---------------------------------------------------------------------------
+  # Minimal per-identity, per-day usage counter (smallest durable primitive).
+  # On-demand billing; TTL auto-expires yesterday's rows. Used to enforce the
+  # daily transcription-minutes allowance per Cognito identity.
+  # ---------------------------------------------------------------------------
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: rojanda-usage
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk        # "<identityId>#YYYY-MM-DD"
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ---------------------------------------------------------------------------
+  # Lambda execution role: permissions come solely from the managed policy
+  # below (attached by ARN); capped by the admin-owned permissions boundary.
+  # ---------------------------------------------------------------------------
+  TranscribeExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: rojanda-transcribe-execution-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Logs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/rojanda-*
+          - Sid: TranscribeStartGetOnly
+            Effect: Allow
+            # Transcribe Start/Get do NOT support resource-level ARN scoping;
+            # "*" is required by AWS. Isolation = server-generated per-user job
+            # names + ownership check + per-user S3 prefixes.
+            Action:
+              - transcribe:StartTranscriptionJob
+              - transcribe:GetTranscriptionJob
+            Resource: "*"
+          - Sid: MediaBucketObjectsOnly
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource: !Sub arn:aws:s3:::${MediaBucketName}/*
+          - Sid: UsageTableOnly
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+            Resource: !GetAtt UsageTable.Arn
+
+  TranscribeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rojanda-transcribe-exec-role
+      PermissionsBoundary: !Ref ExecutionRolePermissionsBoundaryArn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref TranscribeExecutionPolicy
+
+  TranscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: rojanda-transcribe-api
+      Description: RojAnda transcription API (upload-url + start + status).
+      CodeUri: src/
+      Handler: rojanda_transcribe.api.handler
+      Role: !GetAtt TranscribeExecutionRole.Arn
+      Environment:
+        Variables:
+          ROJANDA_MEDIA_BUCKET: !Ref MediaBucketName
+          ROJANDA_USAGE_TABLE: !Ref UsageTable
+          ROJANDA_MAX_AUDIO_SECONDS: !Ref MaxAudioSeconds
+          ROJANDA_MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+          ROJANDA_DAILY_MINUTES_ALLOWANCE: !Ref DailyMinutesAllowancePerIdentity
+          ROJANDA_TRANSCRIBE_LANGUAGE: tr-TR
+      Events:
+        UploadUrl:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TranscribeApi
+            Path: /transcribe/upload-url
+            Method: POST
+        Start:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TranscribeApi
+            Path: /transcribe/start
+            Method: POST
+        Status:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TranscribeApi
+            Path: /transcribe/status
+            Method: GET
+
+  # ---------------------------------------------------------------------------
+  # HTTP API. All routes require AWS_IAM (SigV4 with the caller's Cognito creds)
+  # -> no anonymous access. Default-stage throttling caps abuse.
+  # ---------------------------------------------------------------------------
+  TranscribeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: rojanda-transcribe-http-api
+      Auth:
+        EnableIamAuthorizer: true
+        DefaultAuthorizer: AWS_IAM
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowMethods:
+          - POST
+          - GET
+          - OPTIONS
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottleRateLimit
+        ThrottlingBurstLimit: !Ref ThrottleBurstLimit
+
+  # ---------------------------------------------------------------------------
+  # Cognito Identity Pool. Guest (unauthenticated) identities enabled for the
+  # MVP so we can test without the student account system. Architected so a
+  # future User Pool can be added as an authenticated provider and mapped to
+  # the SAME identity id, preserving each student's data across the upgrade.
+  # ---------------------------------------------------------------------------
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: rojanda_identity_pool
+      # MVP: allow guests. When the RojAnda student account system (a Cognito
+      # User Pool) is added, register it in CognitoIdentityProviders here; its
+      # users map to identity ids in this same pool.
+      AllowUnauthenticatedIdentities: true
+
+  # Authenticated role — reserved for the future student account system. It is
+  # created now (so the mapping is ready) with the SAME minimal permission set
+  # as guest: ONLY execute-api:Invoke on the transcribe routes. No direct S3.
+  CognitoAuthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rojanda-cognito-authenticated-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      Policies:
+        - PolicyName: rojanda-cognito-authenticated-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeTranscribeRoutesOnly
+                Effect: Allow
+                Action: execute-api:Invoke
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TranscribeApi}/*/*/transcribe/*
+
+  # Guest (unauthenticated) role — used by the MVP. Minimal permission: ONLY
+  # execute-api:Invoke on the transcribe routes. NO direct S3 access — all S3
+  # upload happens through short-lived presigned POSTs issued by the backend.
+  CognitoUnauthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rojanda-cognito-unauthenticated-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: unauthenticated
+      Policies:
+        - PolicyName: rojanda-cognito-unauthenticated-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeTranscribeRoutesOnly
+                Effect: Allow
+                Action: execute-api:Invoke
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TranscribeApi}/*/*/transcribe/*
+
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt CognitoAuthenticatedRole.Arn
+        unauthenticated: !GetAtt CognitoUnauthenticatedRole.Arn
+
+  # ---------------------------------------------------------------------------
+  # Cost safeguards.
+  # ---------------------------------------------------------------------------
+  CostAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: rojanda-cost-alerts
+      # NOTE: no email subscription is created yet (per instruction).
+
+  # Account-wide estimated-charges alarm ($25). AWS/Billing is account-scoped by
+  # design (no per-stack billing metric exists).
+  CostGuardAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: rojanda-transcribe-cost-guard
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: !Ref CostAlarmThresholdUsd
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref CostAlertsTopic
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL of the RojAnda transcription HTTP API.
+    Value: !Sub https://${TranscribeApi}.execute-api.${AWS::Region}.amazonaws.com
+  IdentityPoolId:
+    Description: Cognito Identity Pool id (client uses this to obtain per-user creds).
+    Value: !Ref IdentityPool
+  MediaBucket:
+    Description: Private media bucket.
+    Value: !Ref MediaBucket
+  UsageTable:
+    Description: Per-identity daily usage counter table.
+    Value: !Ref UsageTable

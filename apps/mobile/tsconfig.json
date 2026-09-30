@@ -16,5 +16,6 @@
       "@rojanda/design": ["../../packages/design/src/index.ts"]
     }
   },
-  "include": ["app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
 }
