@@ -46,8 +46,9 @@ for your review; they are only run after you approve the final infra list.
    ```
 
 Only the boundary + user + deploy-policy are admin-created. Everything else
-(bucket, function, execution role, execution policy, HTTP API, identity pool,
-alarm) is created by the stack under the `rojanda` deploy profile.
+(bucket, function, execution role, execution policy, HTTP API + JWT authorizer,
+Cognito User Pool + app client, DynamoDB `rojanda-app`, alarm) is created by the
+stack under the `rojanda` deploy profile.
 
 > Alternative: if you prefer not to create a second deployer user, an admin can
 > deploy the stack directly with the `default` profile. The dedicated
@@ -90,12 +91,12 @@ one private media bucket.
 | `ApiGatewayV2HttpApi` / `RojandaStageCreationTagging` | create the HTTP API | `/apis*`, stages tags |
 | `IamCreateBoundedRojandaRoleOnly` | create exec role **with the boundary** | `role/rojanda-*` + `iam:PermissionsBoundary` condition |
 | `IamManageRojandaExecutionRoleOnly` | manage/delete role, trust, tags | `role/rojanda-*` |
-| `IamManageRojandaExecutionManagedPolicyOnly` | manage exec + cognito managed policies + versions | the 3 exact policy ARNs |
+| `IamManageRojandaExecutionManagedPolicyOnly` | manage the exec managed policy + versions | `policy/rojanda-transcribe-execution-policy` |
 | `DenyAnyChangeToTheExecutionBoundaryItself` | **Deny** weakening the boundary | `policy/rojanda-execution-boundary` |
-| `IamAttachOnlyRojandaPoliciesToRojandaRoles` | attach only the 3 rojanda policies | `role/rojanda-*` + `iam:PolicyARN` condition |
+| `IamAttachOnlyRojandaPoliciesToRojandaRoles` | attach only the exec policy | `role/rojanda-*` + `iam:PolicyARN` condition |
 | `IamPassRojandaLambdaRolesToLambdaOnly` | pass exec role to Lambda | `role/rojanda-transcribe-exec-role` + `PassedToService=lambda` |
-| `IamPassRojandaCognitoRolesToCognitoOnly` | pass cognito roles to Cognito | `role/rojanda-cognito-*` + `PassedToService=cognito-identity` |
-| `CognitoIdentityPoolRojanda` | create/manage the identity pool + role mapping | `*` (Cognito identity APIs are not ARN-scopable) |
+| `CognitoUserPoolRojanda` | create/manage the User Pool + app client | `*` (Cognito `CreateUserPool` is not ARN-scopable at create time) |
+| `DynamoDbRojandaAppTableOnly` | create/manage the single table | `table/rojanda-app` |
 | `S3RojandaMediaBucket` | create/configure the private media bucket | `rojanda-media-387276719593` |
 | `SamManagedArtifactBucket` | SAM artifacts | `aws-sam-cli-managed-default*`, `rojanda-sam-artifacts*` |
 | `CloudWatchLogsForRojandaLambda` | manage the log group | `log-group:/aws/lambda/rojanda-*` |

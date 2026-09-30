@@ -133,9 +133,7 @@
         "iam:DeletePolicyVersion"
       ],
       "Resource": [
-        "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy",
-        "arn:aws:iam::387276719593:policy/rojanda-cognito-authenticated-policy",
-        "arn:aws:iam::387276719593:policy/rojanda-cognito-unauthenticated-policy"
+        "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy"
       ]
     },
     {
@@ -165,9 +163,7 @@
       "Condition": {
         "ArnEquals": {
           "iam:PolicyARN": [
-            "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy",
-            "arn:aws:iam::387276719593:policy/rojanda-cognito-authenticated-policy",
-            "arn:aws:iam::387276719593:policy/rojanda-cognito-unauthenticated-policy"
+            "arn:aws:iam::387276719593:policy/rojanda-transcribe-execution-policy"
           ]
         }
       }
@@ -188,31 +184,22 @@
       }
     },
     {
-      "Sid": "IamPassRojandaCognitoRolesToCognitoOnly",
+      "Sid": "CognitoUserPoolRojanda",
       "Effect": "Allow",
       "Action": [
-        "iam:PassRole"
-      ],
-      "Resource": [
-        "arn:aws:iam::387276719593:role/rojanda-cognito-*"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": "cognito-identity.amazonaws.com"
-        }
-      }
-    },
-    {
-      "Sid": "CognitoIdentityPoolRojanda",
-      "Effect": "Allow",
-      "Action": [
-        "cognito-identity:CreateIdentityPool",
-        "cognito-identity:DeleteIdentityPool",
-        "cognito-identity:DescribeIdentityPool",
-        "cognito-identity:UpdateIdentityPool",
-        "cognito-identity:SetIdentityPoolRoles",
-        "cognito-identity:GetIdentityPoolRoles",
-        "cognito-identity:TagResource"
+        "cognito-idp:CreateUserPool",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPoolClient",
+        "cognito-idp:SetUserPoolMfaConfig",
+        "cognito-idp:GetUserPoolMfaConfig",
+        "cognito-idp:TagResource",
+        "cognito-idp:UntagResource",
+        "cognito-idp:ListTagsForResource"
       ],
       "Resource": "*"
     },
@@ -264,7 +251,7 @@
       ]
     },
     {
-      "Sid": "DynamoDbRojandaUsageTableOnly",
+      "Sid": "DynamoDbRojandaAppTableOnly",
       "Effect": "Allow",
       "Action": [
         "dynamodb:CreateTable",
@@ -277,7 +264,7 @@
         "dynamodb:ListTagsOfResource"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-usage"
+        "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-app"
       ]
     },
     {
