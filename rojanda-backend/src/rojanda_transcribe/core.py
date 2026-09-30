@@ -25,7 +25,7 @@ class ClientError(Exception):
 @dataclass(frozen=True)
 class Config:
     media_bucket: str
-    usage_table: str
+    app_table: str
     max_audio_seconds: int
     max_upload_bytes: int
     daily_minutes_allowance: int
@@ -35,7 +35,8 @@ class Config:
     def from_env() -> "Config":
         return Config(
             media_bucket=os.environ["ROJANDA_MEDIA_BUCKET"],
-            usage_table=os.environ["ROJANDA_USAGE_TABLE"],
+            # Single-table store (rojanda-app); usage/job rows fold in here.
+            app_table=os.environ.get("ROJANDA_APP_TABLE", os.environ.get("ROJANDA_USAGE_TABLE", "rojanda-app")),
             max_audio_seconds=int(os.environ.get("ROJANDA_MAX_AUDIO_SECONDS", "5400")),
             max_upload_bytes=int(os.environ.get("ROJANDA_MAX_UPLOAD_BYTES", "157286400")),
             daily_minutes_allowance=int(os.environ.get("ROJANDA_DAILY_MINUTES_ALLOWANCE", "120")),
@@ -44,79 +45,83 @@ class Config:
         )
 
 
-# Identity ids from Cognito look like "us-east-1:<uuid>". We allow the region
-# prefix + a uuid-ish body. This is ONLY used to build/validate our own key
-# prefix; the authoritative value always comes from the verified request
-# context (never the request body).
-_IDENTITY_RE = re.compile(r"^[a-z]{2}-[a-z]+-\d:[0-9a-fA-F-]{36}$")
+# Owner id = the verified Cognito User Pool `sub` (a UUID). Phase 1A: identity
+# now comes from the JWT authorizer, not the Identity Pool. The `sub` is ONLY
+# used to build/validate our own key prefix; the authoritative value always
+# comes from the verified JWT claims (never the request body). See auth.py.
+#
+# NOTE (Phase 1B, deferred): the S3 key SHAPE will migrate from
+# `users/<id>/audio/...` to `owners/<sub>/courses/<c>/lessons/<l>/audio/...`.
+# Phase 1A keeps the existing shape but sources the id from the verified `sub`,
+# so the identity boundary is production-correct without the key migration.
+_OWNER_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
-# Audio object keys we will ever accept/produce. Fixed shape, allow-list charset,
-# no "..", no nested paths beyond the fixed segments.
-_AUDIO_KEY_RE = re.compile(r"^users/([a-z]{2}-[a-z]+-\d:[0-9a-fA-F-]{36})/audio/[A-Za-z0-9._-]+\.m4a$")
+# Audio object keys we will ever accept/produce (Phase 1C authenticated shape):
+#   owners/<sub>/courses/<courseId>/lessons/<lessonId>/audio/<sourceId>.m4a
+# Fixed shape, allow-list charset, no "..", no nested paths beyond the fixed
+# segments. The owner segment is the Cognito `sub` (UUID). courseId/lessonId/
+# sourceId are our own server-generated ids (allow-list charset).
+_ID_SEG = r"[A-Za-z0-9._-]+"
+_SUB_SEG = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_AUDIO_KEY_RE = re.compile(
+    rf"^owners/({_SUB_SEG})/courses/{_ID_SEG}/lessons/{_ID_SEG}/audio/{_ID_SEG}\.m4a$"
+)
 
 
 def get_identity_id(event: dict) -> str:
-    """Return the caller's Cognito identity id from the VERIFIED request context.
+    """DEPRECATED name kept for callers. Returns the verified OWNER id (Cognito
+    User Pool `sub`) via the auth boundary. Fails closed on missing/invalid auth.
 
-    For an IAM-authorized HTTP API (payload v2) the identity that signed the
-    request appears under requestContext.authorizer.iam.cognitoIdentity.identityId
-    (and, defensively, requestContext.identity.cognitoIdentityId on some shapes).
-    We NEVER read identity from the body/query/headers.
+    Phase 1A change: identity is derived from the API Gateway JWT authorizer
+    claims (`sub`), NOT from the Cognito Identity Pool identityId. We NEVER read
+    identity from the body/query/headers/path. New code should call
+    `auth.get_owner_id` / `auth.get_auth_context` directly.
     """
-    rc = (event or {}).get("requestContext", {}) or {}
+    # Imported lazily to avoid a circular import (auth imports ClientError here).
+    from .auth import get_owner_id
 
-    # HTTP API (v2) IAM authorizer shape.
-    iam = (((rc.get("authorizer") or {}).get("iam")) or {})
-    cognito = (iam.get("cognitoIdentity") or {})
-    identity_id = cognito.get("identityId")
-
-    # Defensive fallbacks for alternate/proxy shapes.
-    if not identity_id:
-        identity_id = (rc.get("identity") or {}).get("cognitoIdentityId")
-
-    if not identity_id or not _IDENTITY_RE.match(identity_id):
-        raise ClientError(401, "unauthorized", "Kimlik doğrulanamadı.")
-    return identity_id
+    return get_owner_id(event)
 
 
-def new_audio_key(identity_id: str) -> str:
-    """Server-generated audio key under the caller's own prefix. Client never
-    chooses any part of the path."""
-    return f"users/{identity_id}/audio/{uuid.uuid4().hex}.m4a"
+def new_audio_key(owner_id: str, course_id: str, lesson_id: str, source_id: str) -> str:
+    """Server-generated audio key under the caller's own course/lesson prefix.
+    The client never chooses any part of the path (owner from the verified sub;
+    course/lesson validated; source_id server-generated)."""
+    return f"owners/{owner_id}/courses/{course_id}/lessons/{lesson_id}/audio/{source_id}.m4a"
 
 
-def validate_audio_key(identity_id: str, key: str) -> str:
-    """Accept `key` only if it is well-formed AND owned by `identity_id`.
+def validate_audio_key(owner_id: str, key: str) -> str:
+    """Accept `key` only if it is well-formed AND owned by `owner_id`.
 
     Blocks path injection (regex allow-list, no "..") and cross-user access
-    (the embedded identity must equal the caller's verified identity).
+    (the embedded owner sub must equal the caller's verified sub).
     """
     if not isinstance(key, str):
         raise ClientError(400, "bad_key", "Geçersiz ses anahtarı.")
     m = _AUDIO_KEY_RE.match(key)
     if not m:
         raise ClientError(400, "bad_key", "Geçersiz ses anahtarı.")
-    if m.group(1) != identity_id:
-        # The key belongs to a different identity -> cross-user attempt.
+    if m.group(1) != owner_id:
+        # The key belongs to a different owner -> cross-user attempt.
         raise ClientError(403, "forbidden", "Bu kayda erişim izniniz yok.")
     return key
 
 
 def transcript_key_for(audio_key: str) -> str:
-    """Deterministic per-user output key alongside the audio, same prefix."""
-    # users/<id>/audio/<name>.m4a -> users/<id>/transcript/<name>.json
+    """Deterministic per-user output key alongside the audio, same prefix.
+    .../audio/<name>.m4a -> .../transcript/<name>.json"""
     return audio_key.replace("/audio/", "/transcript/", 1).rsplit(".", 1)[0] + ".json"
 
 
-def job_name_for(identity_id: str, audio_key: str) -> str:
-    """Server-generated, per-identity-namespaced Transcribe job name.
+def job_name_for(owner_id: str, audio_key: str) -> str:
+    """Server-generated, per-owner-namespaced Transcribe job name.
 
     Transcribe job names allow [0-9a-zA-Z._-] and must be <=200 chars. We embed
-    a sanitized identity fragment + a fresh uuid so a client can neither choose
+    a sanitized owner-sub fragment + a fresh uuid so a client can neither choose
     a name nor collide with / read another user's job.
     """
-    ident_frag = re.sub(r"[^0-9a-zA-Z]", "-", identity_id)
-    return f"rojanda-{ident_frag}-{uuid.uuid4().hex}"[:200]
+    owner_frag = re.sub(r"[^0-9a-zA-Z]", "-", owner_id)
+    return f"rojanda-{owner_frag}-{uuid.uuid4().hex}"[:200]
 
 
 def today_utc() -> str:
