@@ -1,21 +1,28 @@
 /**
- * Real device audio recording via expo-av, implementing the shared
+ * Real device audio recording via expo-audio, implementing the shared
  * RecordingService / RecordingHandle interfaces so screens and the core
  * pipeline stay unchanged. This is the mobile platform's implementation; the
  * in-memory MockRecordingService remains for tests and web.
  *
+ * expo-audio is the SDK 57 audio module and IS bundled into Expo Go (expo-av
+ * was removed from the SDK and is not available in Expo Go).
+ *
  * What this does:
  *  - requests microphone permission (throws PermissionDeniedError if refused)
- *  - configures the audio session for recording (iOS needs this)
+ *  - configures the audio session for recording
  *  - start / pause / resume / stop with a real duration and a real file URI
- *  - preserves the recorded file (expo-av writes it to app storage); the URI is
- *    handed back so the caller can save it as the student's own source
+ *  - preserves the recorded file; the URI is handed back so the caller can save
+ *    it as the student's own source
  *
- * It does NOT transcribe — transcription is a separate seam
- * (TranscriptionService / AnalysisBackend.transcribe) that stays honest/pending
- * until the RojAnda backend is connected. No AWS credentials here.
+ * It does NOT transcribe — transcription is a separate seam that stays
+ * honest/pending until the RojAnda backend is connected. No AWS credentials.
  */
-import { Audio } from "expo-av";
+import {
+  AudioModule,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from "expo-audio";
 import type { RecordingHandle, RecordingService } from "@rojanda/api";
 
 export class PermissionDeniedError extends Error {
@@ -25,47 +32,42 @@ export class PermissionDeniedError extends Error {
   }
 }
 
+type Recorder = InstanceType<typeof AudioModule.AudioRecorder>;
+
 class ExpoRecordingHandle implements RecordingHandle {
-  constructor(private recording: Audio.Recording) {}
+  constructor(private recorder: Recorder) {}
 
   async pause(): Promise<void> {
-    await this.recording.pauseAsync();
+    this.recorder.pause();
   }
 
   async resume(): Promise<void> {
-    // expo-av resumes a paused recording by starting it again.
-    await this.recording.startAsync();
+    // expo-audio resumes a paused recording by calling record() again.
+    this.recorder.record();
   }
 
   async stop(): Promise<{ uri: string; durationSec: number }> {
-    let durationMillis = 0;
-    try {
-      const status = await this.recording.stopAndUnloadAsync();
-      durationMillis = status.durationMillis ?? 0;
-    } finally {
-      // Release the recording audio session so playback/other recordings work.
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
-    }
-    const uri = this.recording.getURI();
+    const durationSec = Math.max(1, Math.round(this.recorder.currentTime || 0));
+    await this.recorder.stop();
+    // Release the recording audio session so playback works afterwards.
+    await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+    const uri = this.recorder.uri;
     if (!uri) throw new Error("recording-uri-unavailable");
-    return { uri, durationSec: Math.max(1, Math.round(durationMillis / 1000)) };
+    return { uri, durationSec };
   }
 }
 
 export class ExpoRecordingService implements RecordingService {
   async start(): Promise<RecordingHandle> {
-    const perm = await Audio.requestPermissionsAsync();
+    const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) throw new PermissionDeniedError();
 
-    // Allow recording (and route to speaker so the level indicator behaves).
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-    });
+    // Allow recording (and keep audio active in silent mode).
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
 
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY
-    );
-    return new ExpoRecordingHandle(recording);
+    const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+    return new ExpoRecordingHandle(recorder);
   }
 }

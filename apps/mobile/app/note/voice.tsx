@@ -14,7 +14,7 @@ type Phase = "idle" | "recording" | "editing";
 /**
  * Sesli Not — a QUICK spoken personal note (distinct from Dersi Kaydet, which
  * processes a whole lesson). Reuses the shared recording infrastructure
- * (services.recording via expo-av). The audio is preserved and playable; since
+ * (services.recording via expo-audio). The audio is preserved and playable; since
  * no transcription backend is connected yet, we DO NOT fabricate transcript
  * text — we clearly say transcription is pending and let the student type the
  * note themselves (optional). The note is associated with the current user and

@@ -14,7 +14,7 @@ import { AudioPlayerButton } from "../src/audio/AudioPlayerButton";
 type Phase = "setup" | "recording" | "paused" | "processing" | "done";
 
 /**
- * Dersi Kaydet — records a real lecture on the device (expo-av), preserves the
+ * Dersi Kaydet — records a real lecture on the device (expo-audio), preserves the
  * audio as the student's own source, and creates/associates a lesson. Because
  * no transcription backend is connected yet, we DO NOT fabricate a transcript:
  * the lesson stops in an honest "awaiting transcription" state, the audio is

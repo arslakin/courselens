@@ -1,11 +1,17 @@
 /**
- * Small playback hook over expo-av Audio.Sound for previewing a preserved
- * recording / voice note by its local URI. Kept UI-agnostic so both the lesson
- * workspace and the voice-note screen reuse it. Loads lazily on first play and
- * unloads on unmount to avoid leaking native audio sessions.
+ * Small playback hook over expo-audio for previewing a preserved recording /
+ * voice note by its local URI. Kept UI-agnostic so both the lesson workspace
+ * and the voice-note screen reuse it. Creates the player lazily on first play
+ * and removes it on unmount / uri change to avoid leaking native resources.
+ *
+ * Uses expo-audio (SDK 57, bundled in Expo Go). We intentionally avoid the
+ * `useAudioPlayer` hook from expo-audio here because it eagerly loads a source;
+ * this wrapper keeps our existing {toggle,isPlaying,...} contract used by the
+ * shared AudioPlayerButton.
  */
 import { useEffect, useRef, useState } from "react";
-import { Audio, type AVPlaybackStatus } from "expo-av";
+import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio";
+import type { AudioPlayer } from "expo-audio";
 
 export interface AudioPlayerState {
   isPlaying: boolean;
@@ -17,7 +23,7 @@ export interface AudioPlayerState {
 }
 
 export function useAudioPlayer(uri: string | undefined): AudioPlayerState {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
@@ -26,24 +32,25 @@ export function useAudioPlayer(uri: string | undefined): AudioPlayerState {
 
   useEffect(() => {
     return () => {
-      // Unload on unmount / uri change.
-      soundRef.current?.unloadAsync().catch(() => {});
-      soundRef.current = null;
+      // Release on unmount / uri change.
+      try {
+        playerRef.current?.remove();
+      } catch {
+        /* ignore */
+      }
+      playerRef.current = null;
     };
   }, [uri]);
 
-  const onStatus = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) setError(status.error);
-      return;
-    }
-    setIsPlaying(status.isPlaying);
-    setPositionSec(Math.round((status.positionMillis ?? 0) / 1000));
-    if (status.durationMillis != null) setDurationSec(Math.round(status.durationMillis / 1000));
-    // Reset to start when finished so the button can play again.
+  const onStatus = (status: AudioStatus) => {
+    setIsPlaying(status.playing);
+    setIsLoaded(status.isLoaded);
+    setPositionSec(Math.round(status.currentTime ?? 0));
+    if (status.duration != null) setDurationSec(Math.round(status.duration));
+    // Return to start when finished so the button can play again.
     if (status.didJustFinish) {
       setIsPlaying(false);
-      soundRef.current?.setPositionAsync(0).catch(() => {});
+      playerRef.current?.seekTo(0).catch(() => {});
     }
   };
 
@@ -51,18 +58,18 @@ export function useAudioPlayer(uri: string | undefined): AudioPlayerState {
     if (!uri) return;
     try {
       setError(null);
-      if (!soundRef.current) {
-        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
-        const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true }, onStatus);
-        soundRef.current = sound;
-        setIsLoaded(true);
+      if (!playerRef.current) {
+        await setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+        const player = createAudioPlayer({ uri });
+        player.addListener("playbackStatusUpdate", onStatus);
+        playerRef.current = player;
+        player.play();
         return;
       }
-      const status = await soundRef.current.getStatusAsync();
-      if (status.isLoaded && status.isPlaying) {
-        await soundRef.current.pauseAsync();
+      if (playerRef.current.playing) {
+        playerRef.current.pause();
       } else {
-        await soundRef.current.playAsync();
+        playerRef.current.play();
       }
     } catch (e) {
       setError(String(e));
