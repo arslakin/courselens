@@ -220,10 +220,26 @@ export const tr = {
     associatedCourse: "İlişkili ders",
     associatedLesson: "İlişkili ders kaydı",
     none: "Yok",
-    voiceHint: "Konuş, notun otomatik olarak yazıya dökülsün",
-    voiceRecording: "Dinleniyor…",
+    voiceHint: "Kısa bir sesli not kaydet; sesin saklanır, dilersen metnini de yazabilirsin.",
+    voiceRecording: "Kaydediliyor…",
     voiceExample: "Örn: Hoca bu konunun sınavda önemli olduğunu söyledi.",
     transcribing: "Yazıya dökülüyor…",
+    voiceStart: "Kaydı başlat",
+    voiceStop: "Kaydı bitir",
+    voiceReRecord: "Yeniden kaydet",
+    voiceSaved: "Sesli not kaydedildi",
+    voicePlay: "Sesli notu dinle",
+    voicePause: "Duraklat",
+    // Honest pending state — no automatic transcription connected yet.
+    voiceTranscriptionPending: "Otomatik yazıya dökme henüz bağlı değil",
+    voiceTranscriptionPendingHint:
+      "Sesin saklandı. Otomatik transkript hazır olduğunda burada görünecek. İstersen notunu şimdi kendin yazabilirsin.",
+    voiceTextOptional: "Not metni (isteğe bağlı)",
+    permissionTitle: "Mikrofon izni gerekli",
+    permissionDenied:
+      "Kayıt için mikrofon izni verilmedi. Ayarlar’dan izni açıp tekrar deneyebilirsin.",
+    recordError: "Kayıt başlatılamadı. Lütfen tekrar dene.",
+    saveWithoutText: "Yalnızca sesi kaydet",
   },
 
   podcast: {

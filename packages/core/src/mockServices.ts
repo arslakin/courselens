@@ -454,7 +454,14 @@ export class MockNotesService implements NotesService {
   async create(
     userId: Id,
     body: string,
-    opts?: { title?: string; courseId?: Id; lessonId?: Id; kind?: Note["kind"] }
+    opts?: {
+      title?: string;
+      courseId?: Id;
+      lessonId?: Id;
+      kind?: Note["kind"];
+      audioUri?: string;
+      transcriptionPending?: boolean;
+    }
   ): Promise<Note> {
     const ts = now();
     const note: Note = {
@@ -465,6 +472,8 @@ export class MockNotesService implements NotesService {
       courseId: opts?.courseId,
       lessonId: opts?.lessonId,
       kind: opts?.kind ?? "typed",
+      audioUri: opts?.audioUri,
+      transcriptionPending: opts?.transcriptionPending,
       createdAt: ts,
       updatedAt: ts,
     };

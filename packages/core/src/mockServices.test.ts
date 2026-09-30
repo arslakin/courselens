@@ -428,3 +428,60 @@ describe("processSourceToLesson — source → grounded lesson", () => {
     expect((await s.courses.list(b.id)).length).toBe(0);
   });
 });
+
+describe("voice notes — audio preserved, honest pending transcription", () => {
+  it("saves a voice note with its audio, optional course/lesson, and pending flag; isolates by user", async () => {
+    const store = new MemoryStore();
+    const s = createMockServices(store);
+    const a = await s.auth.signIn("a@x.co");
+    const course = await s.courses.create(a.id, "Kimya");
+    const lesson = await s.lessons.create(course.id, a.id, "Asitler");
+
+    // Audio-only voice note (no transcript yet — never fabricated).
+    const note = await s.notes.create(a.id, "", {
+      kind: "voice",
+      courseId: course.id,
+      lessonId: lesson.id,
+      audioUri: "file:///voice-1.m4a",
+      transcriptionPending: true,
+    });
+
+    expect(note.kind).toBe("voice");
+    expect(note.audioUri).toBe("file:///voice-1.m4a");
+    expect(note.transcriptionPending).toBe(true);
+    expect(note.body).toBe("");
+    expect(note.courseId).toBe(course.id);
+    expect(note.lessonId).toBe(lesson.id);
+
+    // Filterable by lesson, and the audio survives a round-trip through storage.
+    const byLesson = await s.notes.list(a.id, { lessonId: lesson.id });
+    expect(byLesson.length).toBe(1);
+    expect(byLesson[0].audioUri).toBe("file:///voice-1.m4a");
+
+    // Editing in text clears the pending flag; audio is retained.
+    const edited = await s.notes.update(note.id, {
+      body: "Asitler pH 7'nin altındadır.",
+      transcriptionPending: false,
+    });
+    expect(edited.body).toContain("pH");
+    expect(edited.transcriptionPending).toBe(false);
+    expect(edited.audioUri).toBe("file:///voice-1.m4a");
+
+    // A different user never sees user A's voice note.
+    const b = await s.auth.signIn("b@x.co");
+    expect((await s.notes.list(b.id)).length).toBe(0);
+  });
+
+  it("supports a course-less, lesson-less voice note (standalone)", async () => {
+    const s = createMockServices(new MemoryStore());
+    const u = await s.auth.signIn("u@x.co");
+    const note = await s.notes.create(u.id, "hızlı fikir", {
+      kind: "voice",
+      audioUri: "file:///standalone.m4a",
+    });
+    expect(note.courseId).toBeUndefined();
+    expect(note.lessonId).toBeUndefined();
+    expect(note.audioUri).toBe("file:///standalone.m4a");
+    expect((await s.notes.list(u.id)).length).toBe(1);
+  });
+});

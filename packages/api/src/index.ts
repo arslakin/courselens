@@ -197,7 +197,14 @@ export interface NotesService {
   create(
     userId: Id,
     body: string,
-    opts?: { title?: string; courseId?: Id; lessonId?: Id; kind?: Note["kind"] }
+    opts?: {
+      title?: string;
+      courseId?: Id;
+      lessonId?: Id;
+      kind?: Note["kind"];
+      audioUri?: string;
+      transcriptionPending?: boolean;
+    }
   ): Promise<Note>;
   update(noteId: Id, patch: Partial<Note>): Promise<Note>;
   remove(noteId: Id): Promise<void>;

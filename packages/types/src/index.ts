@@ -201,6 +201,14 @@ export interface Note {
   kind: NoteKind;
   title?: string;
   body: string;
+  /** Original audio for a voice note (local URI now; S3 key later). Preserved. */
+  audioUri?: string;
+  /**
+   * True when a voice note's audio has no automatic transcript yet
+   * (transcription backend not connected). `body` holds whatever the student
+   * typed — never fabricated transcript text.
+   */
+  transcriptionPending?: boolean;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
