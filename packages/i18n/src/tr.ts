@@ -18,6 +18,28 @@ export const tr = {
     close: "Kapat",
   },
 
+  auth: {
+    restoring: "Oturum geri yükleniyor…",
+    signInTitle: "Giriş yap",
+    signUpTitle: "Hesap oluştur",
+    confirmTitle: "E-postanı doğrula",
+    email: "E-posta",
+    password: "Şifre",
+    confirmationCode: "Doğrulama kodu",
+    signIn: "Giriş yap",
+    signUp: "Hesap oluştur",
+    confirm: "Doğrula",
+    signOut: "Çıkış yap",
+    toSignUp: "Hesabın yok mu? Oluştur",
+    toSignIn: "Zaten hesabın var mı? Giriş yap",
+    google: "Google ile devam et",
+    apple: "Apple ile devam et",
+    federationPending: "Bu giriş yöntemi yakında etkinleşecek.",
+    confirmSent: "Doğrulama kodu e-postana gönderildi.",
+    genericError: "Giriş yapılamadı. Bilgileri kontrol edip tekrar dene.",
+    devModeBadge: "GELİŞTİRME MODU (sahte oturum)",
+  },
+
   home: {
     title: "RojAnda",
     greeting: (name: string) => `Merhaba, ${name}`,

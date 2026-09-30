@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "@rojanda/design";
 import { ServicesProvider } from "../src/services/ServicesProvider";
 import { AppProvider } from "../src/app-context";
+import { AuthGate } from "../src/auth/AuthGate";
 
 export default function RootLayout() {
   return (
@@ -13,16 +14,20 @@ export default function RootLayout() {
         <AppProvider>
           {/* Dark status-bar content for the light theme. */}
           <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: colors.bg },
-              headerTintColor: colors.text,
-              contentStyle: { backgroundColor: colors.bg },
-              headerShadowVisible: false,
-            }}
-          >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          </Stack>
+          {/* AuthGate shows the auth screen when signed out; the app when signed
+              in. No unconditional auto-login into a fabricated student. */}
+          <AuthGate>
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.bg },
+                headerTintColor: colors.text,
+                contentStyle: { backgroundColor: colors.bg },
+                headerShadowVisible: false,
+              }}
+            >
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            </Stack>
+          </AuthGate>
         </AppProvider>
       </ServicesProvider>
     </SafeAreaProvider>

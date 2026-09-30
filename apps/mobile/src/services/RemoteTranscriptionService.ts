@@ -9,10 +9,11 @@
  * GET /transcribe/status until COMPLETED/FAILED.
  *
  * No AWS credentials live here. All backend calls go through an injected
- * `authorizedRequest` that SigV4-signs with the caller's short-lived Cognito
- * Identity Pool credentials (obtained elsewhere). This service is only wired in
- * when TRANSCRIBE_BASE_URL is configured; otherwise the honest
- * PendingTranscriptionService remains the default (unchanged behavior).
+ * `authorizedRequest` that attaches the caller's Cognito User Pool **JWT**
+ * (`Authorization: Bearer <idToken>`) — NOT SigV4, NOT Identity Pool AWS
+ * credentials. This service is only wired in when TRANSCRIBE_BASE_URL is
+ * configured; otherwise the honest PendingTranscriptionService remains the
+ * default (unchanged behavior).
  *
  * Honesty guarantees:
  *  - Never fabricates transcript text — text is only what the backend returns.
@@ -26,7 +27,7 @@ import type { TranscriptionService } from "@rojanda/api";
 /** Minimal HTTP surface so this is testable with a mocked fetch and carries no
  * AWS SDK dependency in the bundle unless the app actually configures it. */
 export interface AuthorizedRequest {
-  /** SigV4-signed JSON request to the backend; resolves parsed JSON. */
+  /** JWT-authorized JSON request to the backend (Bearer token); resolves parsed JSON. */
   (path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<{
     ok: boolean;
     status: number;

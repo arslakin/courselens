@@ -20,7 +20,7 @@ import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
 
 export default function ProfileScreen() {
-  const { t, user } = useApp();
+  const { t, user, signOut } = useApp();
   const services = useServices();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [name, setName] = useState(user?.displayName ?? "");
@@ -144,6 +144,7 @@ export default function ProfileScreen() {
 
       <Button label={t.profile.myProgress} icon="summary" variant="primary" onPress={() => router.push("/progress")} />
       <Button label={t.profile.accountPrivacy} icon="settings" onPress={() => router.push("/settings")} />
+      <Button label={t.auth.signOut} variant="danger" onPress={signOut} />
 
       {/* About / brand — the Roj mark appears here (profile/about area). */}
       <SectionTitle>{t.profile.about}</SectionTitle>

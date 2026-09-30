@@ -8,11 +8,6 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#faf7f2",
     "icon": "./assets/roj-mark.png",
-    "splash": {
-      "image": "./assets/roj-mark.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#faf7f2"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -41,6 +36,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/roj-mark.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#faf7f2"
+        }
+      ],
+      [
         "expo-audio",
         {
           "microphonePermission": "RojAnda dersleri ve sesli notları kaydetmek için mikrofona erişir."
@@ -52,7 +55,8 @@
           "cameraPermission": "Ders materyalinin fotoğrafını çekmek için kameraya erişir.",
           "photosPermission": "Ders materyali görsellerini seçmek için fotoğraflara erişir."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": false

@@ -18,15 +18,32 @@ export type Locale = "tr" | "en";
 
 // --- Account ---------------------------------------------------------------
 
+/**
+ * A signed-in student.
+ *
+ * IDENTITY vs PROFILE (Phase 1A):
+ *  - `id` is the AUTHENTICATION IDENTITY and the authoritative ownerId. In
+ *    production it is the immutable Cognito User Pool `sub`, derived by the
+ *    BACKEND from the verified JWT. The client never asserts its own `id` as
+ *    proof of ownership. `email` is authentication contact info, NOT an
+ *    ownership/authorization identifier, and must never be used as ownerId.
+ *  - Everything editable (displayName, preferences, school/grade, goals,
+ *    language) is STUDENT PROFILE (`profile`) — mutable, non-authorizing.
+ */
 export interface User {
+  /** Authoritative ownerId. Production = Cognito User Pool `sub` (immutable). */
   id: Id;
+  /** Authentication contact only. NEVER an ownership/authorization identifier. */
   email: string;
+  /** Editable profile field (not identity). */
   displayName: string;
+  /** Editable preference (not identity). */
   locale: Locale;
   createdAt: ISODateString;
   /**
-   * Optional profile fields. All optional so previously-stored users remain
-   * valid (backward compatible); resolved with defaults by ProfileService.
+   * Optional profile fields (editable, non-authorizing). All optional so
+   * previously-stored users remain valid (backward compatible); resolved with
+   * defaults by ProfileService.
    */
   profile?: StudentProfile;
 }
