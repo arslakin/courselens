@@ -69,6 +69,6 @@ export default function PodcastScreen() {
 const styles = StyleSheet.create({
   heroWrap: { alignItems: "center", paddingVertical: spacing.md },
   player: { gap: spacing.sm },
-  progressTrack: { height: 6, backgroundColor: colors.surface2, borderRadius: radius.pill, overflow: "hidden" },
-  progressFill: { height: 6, backgroundColor: colors.accent },
+  progressTrack: { height: 6, backgroundColor: colors.progressTrack, borderRadius: radius.pill, overflow: "hidden" },
+  progressFill: { height: 6, backgroundColor: colors.progressFill },
 });

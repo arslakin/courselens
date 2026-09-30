@@ -9,6 +9,7 @@ import {
   Card,
   Input,
   Loading,
+  Logo,
   Muted,
   Row,
   Screen,
@@ -143,6 +144,15 @@ export default function ProfileScreen() {
 
       <Button label={t.profile.myProgress} icon="summary" variant="primary" onPress={() => router.push("/progress")} />
       <Button label={t.profile.accountPrivacy} icon="settings" onPress={() => router.push("/settings")} />
+
+      {/* About / brand — the Roj mark appears here (profile/about area). */}
+      <SectionTitle>{t.profile.about}</SectionTitle>
+      <Card>
+        <View style={{ alignItems: "center", gap: spacing.sm }}>
+          <Logo size={36} />
+          <Muted>{t.profile.aboutRoj}</Muted>
+        </View>
+      </Card>
     </Screen>
   );
 }

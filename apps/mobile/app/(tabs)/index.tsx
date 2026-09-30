@@ -4,7 +4,7 @@ import { router, useFocusEffect } from "expo-router";
 import type { Lesson, Note } from "@rojanda/types";
 import { nextSuggestion, type Suggestion } from "@rojanda/core";
 import { colors, fontSize, fontWeight, radius, spacing, type IconKey } from "@rojanda/design";
-import { Body, Card, Icon, IconLabel, Muted, Row, Screen, SectionTitle } from "../../src/ui";
+import { Body, Card, Icon, IconLabel, Logo, Muted, Row, Screen, SectionTitle } from "../../src/ui";
 import { Avatar } from "../../src/components/Avatar";
 import { useApp } from "../../src/app-context";
 import { useServices } from "../../src/services/ServicesProvider";
@@ -50,6 +50,8 @@ export default function HomeScreen() {
     <Screen>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
+          {/* Roj mark + wordmark: the app's primary branding moment (Home). */}
+          <Logo size={26} />
           <Text style={styles.greeting}>{t.home.greeting(firstName)}</Text>
           <Muted>{t.tagline}</Muted>
         </View>
@@ -200,7 +202,7 @@ function CaptureButton({
 
 const styles = StyleSheet.create({
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md },
-  greeting: { color: colors.text, fontSize: fontSize.xl, fontWeight: fontWeight.bold },
+  greeting: { color: colors.text, fontSize: fontSize.xl, fontWeight: fontWeight.bold, marginTop: spacing.sm },
   captureRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   capture: {
     flex: 1,

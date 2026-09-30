@@ -62,6 +62,8 @@ export const tr = {
     myProgress: "İlerlemem",
     accountPrivacy: "Hesap ve gizlilik",
     coursesCount: "Ders sayısı",
+    about: "Hakkında",
+    aboutRoj: "RojAnda, Roj Collective kimliğiyle tasarlanmıştır.",
     minimalDataNote: "Yalnızca gerekli bilgileri istiyoruz. Doldurmak zorunda değilsin.",
   },
 

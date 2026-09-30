@@ -23,7 +23,7 @@ export default function TabsLayout() {
         headerTintColor: colors.text,
         headerShadowVisible: false,
         tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.accent, // Roj blue for the selected tab
+        tabBarActiveTintColor: colors.accent, // Roj red (brand) for the selected tab
         tabBarInactiveTintColor: colors.muted, // neutral for inactive
       }}
     >

@@ -22,7 +22,17 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ColorValue } from "react-native";
-import { colors, fontSize, fontWeight, ICONS, radius, spacing, TOUCH_TARGET, type IconKey } from "@rojanda/design";
+import {
+  brand,
+  colors,
+  fontSize,
+  fontWeight,
+  ICONS,
+  radius,
+  spacing,
+  TOUCH_TARGET,
+  type IconKey,
+} from "@rojanda/design";
 
 /**
  * Icon — single wrapper over Ionicons so every icon shares size/color defaults
@@ -59,38 +69,81 @@ export function Logo({ size = 28, showWordmark = true }: { size?: number; showWo
   );
 }
 
+/**
+ * BrandBackground — a subtle, static "woven-wash" treatment built from the Roj
+ * brand tints using layered Views (no gradient native dep). Two soft diagonal
+ * corner blocks (tan + olive) and a faint red edge evoke the kilim weave while
+ * keeping the bulk of the screen a calm warm off-white so content stays
+ * readable. Rendered BEHIND screen content, non-interactive.
+ */
+export function BrandBackground() {
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View style={brandStyles.washTanCorner} />
+      <View style={brandStyles.washOliveCorner} />
+      <View style={brandStyles.washRedStripe} />
+    </View>
+  );
+}
+
 export function Screen({
   children,
   scroll = true,
   contentStyle,
+  brandBackground = true,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
   contentStyle?: ViewStyle;
+  /** Show the subtle Roj woven-wash behind content (default on). */
+  brandBackground?: boolean;
 }) {
   // KeyboardAvoidingView keeps inputs visible when the keyboard opens (notes,
   // chat, record title). "padding" on iOS, height on Android is the standard
   // pairing; uses only React Native core (no extra native dependency).
   const behavior = Platform.OS === "ios" ? "padding" : undefined;
 
-  if (scroll) {
-    return (
-      <KeyboardAvoidingView style={styles.screen} behavior={behavior}>
-        <ScrollView
-          style={styles.screen}
-          contentContainerStyle={[styles.screenContent, contentStyle]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        >
-          {children}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  }
+  const body = scroll ? (
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.screenContent, contentStyle]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      {children}
+    </ScrollView>
+  ) : (
+    <View style={[styles.screen, styles.screenContent, contentStyle]}>{children}</View>
+  );
+
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={behavior}>
-      <View style={[styles.screen, styles.screenContent, contentStyle]}>{children}</View>
+      {brandBackground ? <BrandBackground /> : null}
+      {body}
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * Hero — branded header band pairing the Roj mark + RojAnda wordmark on a soft
+ * brand tint, for Home/section tops. Used sparingly (not on every screen) so
+ * the logo isn't overused.
+ */
+export function Hero({
+  title,
+  subtitle,
+  showLogo = true,
+}: {
+  title?: string;
+  subtitle?: string;
+  showLogo?: boolean;
+}) {
+  return (
+    <View style={brandStyles.hero}>
+      {showLogo ? <Logo size={30} /> : null}
+      {title ? <Text style={brandStyles.heroTitle}>{title}</Text> : null}
+      {subtitle ? <Text style={[styles.body, styles.muted]}>{subtitle}</Text> : null}
+    </View>
   );
 }
 
@@ -290,5 +343,61 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xl,
     fontWeight: fontWeight.bold,
     letterSpacing: 0.5,
+  },
+});
+
+/**
+ * Roj brand background/accent treatment. Subtle, low-saturation blocks in the
+ * three brand hues so the palette lives in the BACKGROUND without hurting
+ * readability (content cards sit on top and stay light). Uses only RN Views —
+ * no gradient native dependency.
+ */
+const brandStyles = StyleSheet.create({
+  washTanCorner: {
+    position: "absolute",
+    top: -80,
+    right: -60,
+    width: 240,
+    height: 240,
+    borderRadius: 40,
+    backgroundColor: colors.brandTintTan,
+    transform: [{ rotate: "45deg" }],
+    opacity: 0.9,
+  },
+  washOliveCorner: {
+    position: "absolute",
+    bottom: -90,
+    left: -70,
+    width: 260,
+    height: 260,
+    borderRadius: 44,
+    backgroundColor: colors.brandTintOlive,
+    transform: [{ rotate: "45deg" }],
+    opacity: 0.9,
+  },
+  washRedStripe: {
+    position: "absolute",
+    top: 120,
+    left: -40,
+    width: 120,
+    height: 18,
+    borderRadius: radius.pill,
+    backgroundColor: brand.red,
+    opacity: 0.06,
+    transform: [{ rotate: "45deg" }],
+  },
+  hero: {
+    backgroundColor: colors.brandTintTan,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.xs,
+  },
+  heroTitle: {
+    color: colors.text,
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.bold,
+    marginTop: spacing.xs,
   },
 });
