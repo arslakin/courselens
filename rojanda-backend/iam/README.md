@@ -1,59 +1,57 @@
 # RojAnda transcription backend — deployment IAM (proposal)
 
-This directory is a **proposal** for the isolated RojAnda transcription backend's
-deployment identity and runtime permissions boundary. **Nothing here has been
-created in AWS.** Account `387276719593`, region `us-east-1`.
+This directory defines the isolated RojAnda transcription backend's deployment
+IAM and the runtime permissions boundary. **Nothing here has been created in
+AWS.** Account `387276719593`, region `eu-central-1` (Frankfurt — the RojAnda
+production target).
 
 It deliberately does **not** touch or broaden the frozen RojLearn deployer
-(`courselens-deployer`) or the RojLearn boundary. RojAnda gets its own
-dedicated, least-privilege identity and its own boundary.
+(`courselens-deployer`) or the RojLearn boundary. RojAnda's boundary and deploy
+policy are its own, least-privilege, and scoped to `rojanda-*` names only.
 
 Files:
-- `rojanda-deploy-policy.json` — identity policy for a **new** `rojanda-deployer`
-  user (what it may do to deploy the `rojanda-transcribe` SAM stack).
+- `rojanda-deploy-policy.json` — the least-privilege identity policy describing
+  exactly what is needed to deploy the `rojanda-transcribe` SAM stack. Kept as a
+  reusable artifact; it can be attached to a dedicated deployer later (see
+  "Future hardening" below).
 - `rojanda-execution-boundary.json` — the **permissions boundary** applied to the
   Lambda execution role (the hard runtime cap).
-- The Lambda execution role + its execution policy + the Cognito roles are
-  defined in `../template.yaml` (created by the stack itself).
+- The Lambda execution role + its execution policy + the Cognito User Pool /
+  app client are defined in `../template.yaml` (created by the stack itself).
 
 ---
 
-## One-time admin steps (run with the `default` / `rojai-deployer` admin profile)
+## Initial beta deployment (current decision)
 
-These mirror how RojLearn's boundary was created out-of-band by an admin, so the
-deployer can never widen its own ceiling. **Show-then-apply**: these are listed
-for your review; they are only run after you approve the final infra list.
+For the initial RojAnda beta, the stack is deployed with the **currently
+authenticated admin identity** (`rojai-deployer`). No dedicated `rojanda-deployer`
+user, no access keys, and no new CLI profile are created for the beta.
 
-1. Create the RojAnda execution boundary (admin-owned):
-   ```
-   aws iam create-policy \
-     --policy-name rojanda-execution-boundary \
-     --policy-document file://rojanda-backend/iam/rojanda-execution-boundary.json \
-     --profile default
-   ```
-2. Create the dedicated deployer identity + policy (admin-owned):
-   ```
-   aws iam create-user --user-name rojanda-deployer --profile default
-   aws iam create-policy \
-     --policy-name rojanda-deploy-policy \
-     --policy-document file://rojanda-backend/iam/rojanda-deploy-policy.json \
-     --profile default
-   aws iam attach-user-policy --user-name rojanda-deployer \
-     --policy-arn arn:aws:iam::387276719593:policy/rojanda-deploy-policy \
-     --profile default
-   aws iam create-access-key --user-name rojanda-deployer --profile default
-   # -> store as a new [rojanda] CLI profile; used for all rojanda-* deploys
-   ```
+Only one admin-owned prerequisite must exist before the first `sam deploy`: the
+execution permissions boundary. It is created out-of-band (not by the stack) so
+that the runtime execution role can never widen its own ceiling:
 
-Only the boundary + user + deploy-policy are admin-created. Everything else
-(bucket, function, execution role, execution policy, HTTP API + JWT authorizer,
-Cognito User Pool + app client, DynamoDB `rojanda-app`, alarm) is created by the
-stack under the `rojanda` deploy profile.
+```
+aws iam create-policy \
+  --policy-name rojanda-execution-boundary \
+  --policy-document file://rojanda-backend/iam/rojanda-execution-boundary.json
+```
 
-> Alternative: if you prefer not to create a second deployer user, an admin can
-> deploy the stack directly with the `default` profile. The dedicated
-> `rojanda-deployer` is the least-privilege, RojLearn-style option and is
-> recommended. Either way, `courselens-deployer` is left unchanged.
+Everything else — media bucket, `rojanda-api` function, execution role,
+execution policy, HTTP API + JWT authorizer, Cognito User Pool + app client,
+DynamoDB `rojanda-app`, cost alarm + topic — is created by the SAM stack itself,
+in `eu-central-1`, using the same authenticated admin identity.
+
+`courselens-deployer` / the frozen RojLearn boundary are left unchanged.
+
+## Future hardening (optional, not for the beta)
+
+When more operators are involved, replace the admin-identity deploy with a
+dedicated least-privilege identity by attaching `rojanda-deploy-policy` to a
+`rojanda-deployer` principal. Prefer short-lived credentials (an assumable role
+or IAM Identity Center / SSO session) over a long-lived access key. The
+`rojanda-deploy-policy.json` in this directory is authored for exactly this and
+can be attached without other changes.
 
 ---
 
@@ -67,16 +65,22 @@ Effective runtime permissions — **nothing else**:
 - CloudWatch Logs for `/aws/lambda/rojanda-*`
 - `transcribe:StartTranscriptionJob` + `transcribe:GetTranscriptionJob`
 - `s3:GetObject` + `s3:PutObject` on `rojanda-media-387276719593/*`
+- On DynamoDB `rojanda-app` only: `GetItem`, `PutItem`, `UpdateItem`,
+  `DeleteItem`, `Query`, `BatchWriteItem` (the single-table access the API
+  needs for profile / course / lesson / source / transcript / job / usage
+  items, all partitioned by `OWNER#<sub>`)
 
 ### Note on the Transcribe resource scope
 `transcribe:StartTranscriptionJob` / `GetTranscriptionJob` do not support
 per-job ARN resource scoping (job names are caller-chosen; the actions are
 effectively account-scoped in IAM). The boundary therefore uses
 `"Resource": "*"` for **exactly those two actions only**. Real per-user
-isolation comes from (a) the S3 per-user key prefix, and (b) the Cognito
-identity policy — see the security section of the approval doc. The Lambda can
-start/read transcription jobs but can only read/write audio + output under the
-one private media bucket.
+isolation comes from (a) the per-owner S3 key prefix (`owners/<sub>/...`), and
+(b) the server-side ownership check that derives `ownerId` from the verified
+Cognito User Pool JWT `sub` (there is no Identity Pool and the client holds no
+AWS credentials). The Lambda can start/read transcription jobs but can only
+read/write audio + output under the one private media bucket, and can only
+touch the single `rojanda-app` table.
 
 ---
 

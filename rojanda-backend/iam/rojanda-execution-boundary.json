@@ -9,7 +9,7 @@
         "logs:CreateLogStream",
         "logs:PutLogEvents"
       ],
-      "Resource": "arn:aws:logs:us-east-1:387276719593:log-group:/aws/lambda/rojanda-*"
+      "Resource": "arn:aws:logs:eu-central-1:387276719593:log-group:/aws/lambda/rojanda-*"
     },
     {
       "Sid": "BoundaryAllowTranscribeBatchJobsOnly",
@@ -30,13 +30,17 @@
       "Resource": "arn:aws:s3:::rojanda-media-387276719593/*"
     },
     {
-      "Sid": "BoundaryAllowUsageTableOnly",
+      "Sid": "BoundaryAllowAppTableOnly",
       "Effect": "Allow",
       "Action": [
         "dynamodb:GetItem",
-        "dynamodb:UpdateItem"
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:BatchWriteItem"
       ],
-      "Resource": "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-usage"
+      "Resource": "arn:aws:dynamodb:eu-central-1:387276719593:table/rojanda-app"
     }
   ]
 }

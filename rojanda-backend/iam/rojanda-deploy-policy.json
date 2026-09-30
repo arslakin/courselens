@@ -21,7 +21,7 @@
         "cloudformation:DeleteChangeSet"
       ],
       "Resource": [
-        "arn:aws:cloudformation:us-east-1:387276719593:stack/rojanda-*/*"
+        "arn:aws:cloudformation:eu-central-1:387276719593:stack/rojanda-*/*"
       ]
     },
     {
@@ -41,7 +41,7 @@
         "cloudformation:CreateChangeSet"
       ],
       "Resource": [
-        "arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
+        "arn:aws:cloudformation:eu-central-1:aws:transform/Serverless-2016-10-31"
       ]
     },
     {
@@ -64,7 +64,7 @@
         "lambda:GetPolicy"
       ],
       "Resource": [
-        "arn:aws:lambda:us-east-1:387276719593:function:rojanda-*"
+        "arn:aws:lambda:eu-central-1:387276719593:function:rojanda-*"
       ]
     },
     {
@@ -78,16 +78,16 @@
         "apigateway:DELETE"
       ],
       "Resource": [
-        "arn:aws:apigateway:us-east-1::/apis",
-        "arn:aws:apigateway:us-east-1::/apis/*",
-        "arn:aws:apigateway:us-east-1::/tags/*"
+        "arn:aws:apigateway:eu-central-1::/apis",
+        "arn:aws:apigateway:eu-central-1::/apis/*",
+        "arn:aws:apigateway:eu-central-1::/tags/*"
       ]
     },
     {
       "Sid": "RojandaStageCreationTagging",
       "Effect": "Allow",
       "Action": "apigateway:TagResource",
-      "Resource": "arn:aws:apigateway:us-east-1::/apis/*/stages"
+      "Resource": "arn:aws:apigateway:eu-central-1::/apis/*/stages"
     },
     {
       "Sid": "IamCreateBoundedRojandaRoleOnly",
@@ -264,7 +264,7 @@
         "dynamodb:ListTagsOfResource"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:387276719593:table/rojanda-app"
+        "arn:aws:dynamodb:eu-central-1:387276719593:table/rojanda-app"
       ]
     },
     {
@@ -279,7 +279,7 @@
         "logs:ListTagsForResource"
       ],
       "Resource": [
-        "arn:aws:logs:us-east-1:387276719593:log-group:/aws/lambda/rojanda-*"
+        "arn:aws:logs:eu-central-1:387276719593:log-group:/aws/lambda/rojanda-*"
       ]
     },
     {
@@ -292,7 +292,7 @@
         "cloudwatch:TagResource"
       ],
       "Resource": [
-        "arn:aws:cloudwatch:us-east-1:387276719593:alarm:rojanda-*"
+        "arn:aws:cloudwatch:eu-central-1:387276719593:alarm:rojanda-*"
       ]
     },
     {
@@ -308,7 +308,7 @@
         "sns:TagResource"
       ],
       "Resource": [
-        "arn:aws:sns:us-east-1:387276719593:rojanda-*"
+        "arn:aws:sns:eu-central-1:387276719593:rojanda-*"
       ]
     }
   ]
