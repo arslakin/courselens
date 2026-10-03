@@ -106,6 +106,37 @@ def put(owner_id: str, sk: str, attrs: dict) -> dict:
     return item
 
 
+class ClaimConflict(Exception):
+    """Raised when a conditional claim write loses the race (another worker/
+    request already holds a fresh claim on the item)."""
+
+
+def put_claim(owner_id: str, sk: str, attrs: dict, *, fresh_before_epoch: int) -> dict:
+    """Conditionally write an item ONLY if no fresh claim already exists.
+
+    The write succeeds when EITHER the item does not exist, OR its existing
+    `startedAt` is older than `fresh_before_epoch` (a stale/abandoned claim that
+    may be reclaimed). This is the single-writer guard that prevents duplicate
+    generation runs (and duplicate paid model spend) when a client retries after
+    an API Gateway timeout or a network drop. Raises ClaimConflict on loss.
+    """
+    item = {"pk": owner_pk(owner_id), "sk": sk, **attrs}
+    try:
+        _dynamodb.put_item(
+            TableName=_table(),
+            Item=_dict_to_item(item),
+            ConditionExpression="attribute_not_exists(sk) OR startedAtEpoch < :fresh",
+            ExpressionAttributeValues={":fresh": _to_attr(fresh_before_epoch)},
+        )
+    except Exception as e:  # noqa: BLE001
+        # boto3 raises botocore ConditionalCheckFailedException; the fake raises
+        # its own. Both mean: a fresh claim already exists -> do not start again.
+        if type(e).__name__ == "ConditionalCheckFailedException":
+            raise ClaimConflict() from e
+        raise
+    return item
+
+
 def get(owner_id: str, sk: str) -> Optional[dict]:
     resp = _dynamodb.get_item(
         TableName=_table(), Key={"pk": _to_attr(owner_pk(owner_id)), "sk": _to_attr(sk)}
@@ -171,6 +202,17 @@ def sk_job(job_name: str) -> str:
 
 def sk_usage(day: str) -> str:
     return f"USAGE#{day}"
+
+
+# Study material is scoped to a specific transcript source so it stays coherent
+# when the same lesson has multiple recordings.
+# SK = STUDY#<lessonId>#<sourceId>
+def sk_study(lesson_id: str, source_id: str) -> str:
+    return f"STUDY#{lesson_id}#{source_id}"
+
+
+def sk_study_prefix(lesson_id: str) -> str:
+    return f"STUDY#{lesson_id}#"
 
 
 # --- Ownership helpers -------------------------------------------------------

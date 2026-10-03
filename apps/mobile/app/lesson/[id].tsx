@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import type { Lesson, Note, Source } from "@rojanda/types";
+import type { Lesson, Note, ServerStudySet, Source } from "@rojanda/types";
 import {
   Body,
   Button,
@@ -15,7 +15,7 @@ import {
 } from "../../src/ui";
 import { retryLessonTranscription } from "@rojanda/core";
 import { useApp } from "../../src/app-context";
-import { useServices, useTranscriptService } from "../../src/services/ServicesProvider";
+import { useServices, useStudyService, useTranscriptService } from "../../src/services/ServicesProvider";
 import { selectLessonTranscriptText, type LessonTranscript } from "../../src/services/ApiServices";
 import { AudioPlayerButton } from "../../src/audio/AudioPlayerButton";
 
@@ -25,15 +25,31 @@ function formatDuration(sec: number): string {
   return m > 0 ? `${m} dk ${s} sn` : `${s} sn`;
 }
 
+/**
+ * Choose which server study set to surface for the lesson. Prefers a READY set,
+ * otherwise the most recently updated one (so an in-flight "generating" or a
+ * "failed" state is still shown). Never fabricates — returns null when empty.
+ */
+function pickNewestStudy(sets: ServerStudySet[]): ServerStudySet | null {
+  if (!sets || sets.length === 0) return null;
+  const byUpdated = [...sets].sort((a, b) =>
+    (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "")
+  );
+  return byUpdated.find((s) => s.status === "ready") ?? byUpdated[0];
+}
+
 export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, user } = useApp();
   const services = useServices();
   const transcriptService = useTranscriptService();
+  const studyService = useStudyService();
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [serverTranscripts, setServerTranscripts] = useState<LessonTranscript[]>([]);
+  const [serverStudy, setServerStudy] = useState<ServerStudySet | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
 
@@ -59,18 +75,80 @@ export default function LessonScreen() {
         });
       }
     }
+    // Server-persisted, grounded study materials (Phase 2). Read-only: this
+    // NEVER triggers generation. The newest item for the lesson is shown.
+    let study: ServerStudySet | null = null;
+    if (studyService && l?.courseId) {
+      try {
+        const sets = await studyService.listByLesson(l.courseId, id);
+        study = pickNewestStudy(sets);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[lesson] study load failed", {
+          lessonId: id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
     setLesson(l);
     setSources(srcs);
     setNotes(ns);
     setServerTranscripts(trs);
+    setServerStudy(study);
     setLoading(false);
-  }, [id, services, transcriptService, user]);
+  }, [id, services, transcriptService, studyService, user]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load])
   );
+
+  // Re-read ONLY the server study materials (read-only; never triggers
+  // generation). Used by the polling loop while a background job runs.
+  const lessonCourseId = lesson?.courseId;
+  const refreshStudy = useCallback(async () => {
+    if (!studyService || !id || !lessonCourseId) return;
+    try {
+      const sets = await studyService.listByLesson(lessonCourseId, id);
+      setServerStudy(pickNewestStudy(sets));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[lesson] study poll failed", {
+        lessonId: id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, [studyService, id, lessonCourseId]);
+
+  // POLLING: while a study set is "generating" (async backend job in flight),
+  // poll GET /study every few seconds until it reaches ready/failed. Bounded by
+  // a max attempt count so a stuck job never polls forever. Clears on unmount,
+  // on status change, or when the attempt budget is exhausted.
+  const pollAttemptsRef = useRef(0);
+  const isGeneratingStatus = serverStudy?.status === "generating";
+  useEffect(() => {
+    if (!isGeneratingStatus) {
+      pollAttemptsRef.current = 0;
+      return;
+    }
+    const POLL_INTERVAL_MS = 4000;
+    const MAX_POLLS = 90; // ~6 min ceiling (covers a full ~50-min lesson job)
+    let cancelled = false;
+    const timer = setInterval(() => {
+      pollAttemptsRef.current += 1;
+      if (cancelled) return;
+      if (pollAttemptsRef.current > MAX_POLLS) {
+        clearInterval(timer);
+        return;
+      }
+      refreshStudy();
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isGeneratingStatus, refreshStudy]);
 
   if (loading) return <Screen scroll={false} contentStyle={{ flex: 1, justifyContent: "center" }}><Loading /></Screen>;
   if (!lesson) return <Screen><Muted>{t.common.empty}</Muted></Screen>;
@@ -112,6 +190,22 @@ export default function LessonScreen() {
     });
     Alert.alert(t.study.added);
     load();
+  };
+
+  // Generate (or regenerate) the grounded server study materials. Idempotent on
+  // the backend: a plain tap returns the existing ready set without a new model
+  // call; `force` is only used to refresh after the transcript changed.
+  const generateServerStudy = async (force = false) => {
+    if (!studyService || !lesson) return;
+    setGenerating(true);
+    try {
+      const result = await studyService.generate(lesson.courseId, lesson.id, { force });
+      setServerStudy(result);
+    } catch (e) {
+      Alert.alert(t.study.materialsTitle, e instanceof Error ? e.message : t.study.generateError);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -255,6 +349,139 @@ export default function LessonScreen() {
           </Row>
         </>
       )}
+
+      {/* ---- Server-persisted grounded study materials (Phase 2) ----
+           Shown only in API-persistence mode and only once a transcript exists.
+           The transcript above is NEVER hidden or replaced by this section. */}
+      {studyService && transcriptText ? (
+        <>
+          <SectionTitle icon="suggestion">{t.study.materialsTitle}</SectionTitle>
+          <Card>
+            <Muted>{t.study.fromYourSources}</Muted>
+          </Card>
+
+          {generating || serverStudy?.status === "generating" ? (
+            // GENERATING state.
+            <Card>
+              <Body>{t.study.generating}</Body>
+              <Muted>{t.study.generatingHint}</Muted>
+              <Loading />
+            </Card>
+          ) : serverStudy?.status === "failed" ? (
+            // FAILED state — retryable, nothing fabricated.
+            <Card>
+              <Body>{t.study.failed}</Body>
+              <Muted>{t.study.failedHint}</Muted>
+              <Button
+                label={t.common.retry}
+                icon="suggestion"
+                onPress={() => generateServerStudy(false)}
+                disabled={generating}
+              />
+            </Card>
+          ) : serverStudy?.status === "ready" ? (
+            // READY state — persisted content, loaded without a new model call.
+            <>
+              {serverStudy.stale ? (
+                <Card>
+                  <Body>{t.study.stale}</Body>
+                  <Muted>{t.study.staleHint}</Muted>
+                  <Button
+                    label={t.study.regenerate}
+                    icon="suggestion"
+                    onPress={() => generateServerStudy(true)}
+                    disabled={generating}
+                  />
+                </Card>
+              ) : null}
+
+              {serverStudy.summary ? (
+                <>
+                  <SectionTitle icon="summary">{t.study.summary}</SectionTitle>
+                  <Card>
+                    <Body>{serverStudy.summary}</Body>
+                    <Button
+                      label={t.study.addToNotes}
+                      icon="newNote"
+                      onPress={() => addToNotes(t.study.summary, serverStudy.summary!)}
+                    />
+                  </Card>
+                </>
+              ) : null}
+
+              {serverStudy.concepts && serverStudy.concepts.length > 0 ? (
+                <>
+                  <SectionTitle icon="concepts">{t.study.keyConcepts}</SectionTitle>
+                  {serverStudy.concepts.map((c, i) => (
+                    <Card key={`${c.name}-${i}`}>
+                      <Body>{c.name}</Body>
+                      <Muted>{c.explanation}</Muted>
+                      <Button
+                        label={t.study.addToNotes}
+                        icon="newNote"
+                        onPress={() => addToNotes(c.name, `${c.name}: ${c.explanation}`)}
+                      />
+                    </Card>
+                  ))}
+                </>
+              ) : null}
+
+              {serverStudy.flashcards && serverStudy.flashcards.length > 0 ? (
+                <>
+                  <SectionTitle icon="flashcards">{t.study.cards}</SectionTitle>
+                  {serverStudy.flashcards.map((f, i) => (
+                    <Card key={`${f.front}-${i}`}>
+                      <Body>{f.front}</Body>
+                      <Muted>{f.back}</Muted>
+                    </Card>
+                  ))}
+                </>
+              ) : null}
+
+              {serverStudy.quiz && serverStudy.quiz.length > 0 ? (
+                <>
+                  <SectionTitle icon="quiz">{t.study.quiz}</SectionTitle>
+                  {serverStudy.quiz.map((q, i) => (
+                    <Card key={`${q.prompt}-${i}`}>
+                      <Body>{q.prompt}</Body>
+                      {q.options.map((o, oi) => (
+                        <Muted key={oi}>
+                          {oi === q.correctIndex ? "✓ " : "• "}
+                          {o}
+                        </Muted>
+                      ))}
+                      <Muted>{q.explanation}</Muted>
+                    </Card>
+                  ))}
+                </>
+              ) : null}
+
+              <Row style={{ flexWrap: "wrap" }}>
+                <Button
+                  label={t.study.regenerate}
+                  icon="suggestion"
+                  onPress={() => generateServerStudy(true)}
+                  disabled={generating}
+                />
+              </Row>
+            </>
+          ) : (
+            // NOT GENERATED state — explicit opt-in so no model call happens
+            // without the student's action (no accidental AI spend).
+            <Card>
+              <Body>{t.study.notGenerated}</Body>
+              <Muted>{t.study.notGeneratedHint}</Muted>
+              <Button
+                label={t.study.generate}
+                icon="suggestion"
+                variant="primary"
+                onPress={() => generateServerStudy(false)}
+                disabled={generating}
+              />
+            </Card>
+          )}
+        </>
+      ) : null}
     </Screen>
   );
 }

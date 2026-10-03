@@ -17,6 +17,8 @@ body/query/headers/path):
   POST   /transcribe/upload-url                     -> presigned POST (150 MB)
   POST   /transcribe/start                          -> tr-TR job (server-named)
   GET    /transcribe/status                         -> status/transcript
+  GET    /courses/{courseId}/lessons/{lessonId}/study   -> list study materials (+stale flag)
+  POST   /courses/{courseId}/lessons/{lessonId}/study   -> generate grounded study (idempotent)
 
 Security-critical rules:
   * ownerId comes only from verified JWT claims (never the body/query/path)
@@ -497,12 +499,23 @@ def _route(cfg: Config, owner_id: str, event: dict):
     course_id = p.get("courseId")
     lesson_id = p.get("lessonId")
 
-    # --- sources / transcripts for a lesson (cross-device retrieval) ---
+    # --- sources / transcripts / study for a lesson (cross-device retrieval) ---
     if lesson_id is not None and course_id is not None and method == "GET":
         if path.endswith("/sources"):
             return resources.list_sources(owner_id, course_id, lesson_id)
         if path.endswith("/transcripts"):
             return resources.list_transcripts(owner_id, course_id, lesson_id)
+        if path.endswith("/study"):
+            return resources.list_study(owner_id, course_id, lesson_id)
+    # Study generation: grounded, idempotent, bounded. Specific path, checked
+    # before the generic nested-lesson PUT/DELETE below.
+    if lesson_id is not None and course_id is not None and method == "POST" and path.endswith("/study"):
+        result = resources.generate_study(cfg.language_code, owner_id, course_id, lesson_id, _parse_body(event))
+        # 202 Accepted when generation is still running (async hand-off); 200
+        # when a ready result is returned inline (local provider) or already
+        # existed. The body shape is identical either way.
+        status = 202 if result.get("status") == "generating" else 200
+        return (status, result)
 
     # --- lessons (nested) ---
     if lesson_id is not None:
@@ -539,7 +552,13 @@ def handler(event, _context=None):
     cfg = Config.from_env()
     try:
         owner_id = get_owner_id(event)  # verified sub or 401
-        return _response(200, _route(cfg, owner_id, event))
+        routed = _route(cfg, owner_id, event)
+        # A route may return either a payload (-> 200) or an explicit
+        # (status, payload) tuple (e.g. 202 Accepted for async study generation).
+        if isinstance(routed, tuple):
+            status, payload = routed
+            return _response(status, payload)
+        return _response(200, routed)
     except ClientError as e:
         if e.status >= 500:
             method, path = _method_path(event)

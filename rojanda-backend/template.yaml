@@ -30,10 +30,12 @@ Parameters:
   ExecutionRolePermissionsBoundaryArn:
     Type: String
     Description: >
-      ARN of the admin-created permissions boundary applied to the Lambda
-      execution role (rojanda-execution-boundary). Created out-of-band by an
-      admin (NOT by rojanda-deployer); caps runtime perms to Logs + Transcribe
-      start/get + S3 get/put on the media bucket + the usage table.
+      ARN of the admin-owned permissions boundary applied to both RojAnda
+      Lambda roles. It retains the existing API ceiling and, before a
+      Bedrock-enabled Phase 2 deploy, must add principal-scoped allowances for:
+      API SendMessage to the study queue; worker consumption of that queue; and
+      worker-only InvokeModel on the approved EU Nova Lite profile/models.
+      The identity policies remain narrower and provide the actual grants.
   MaxAudioSeconds:
     Type: Number
     Default: 5400   # 90 minutes hard cap (also enforced client-side)
@@ -52,6 +54,44 @@ Parameters:
   CostAlarmThresholdUsd:
     Type: Number
     Default: 25
+  # --- Phase 2: study-material AI provider ---------------------------------
+  StudyProvider:
+    Type: String
+    Default: local
+    AllowedValues: [local, bedrock]
+    Description: >
+      Study-material generation provider. "local" is a deterministic grounded
+      extractive generator (no model cost). "bedrock" uses Amazon Bedrock and
+      also requires AllowBedrock=1. Default local so no paid model runs unless
+      explicitly enabled for a deploy.
+  BedrockModelId:
+    Type: String
+    Default: eu.amazon.nova-lite-v1:0
+    AllowedValues:
+      - eu.amazon.nova-lite-v1:0
+    Description: >
+      EU cross-region inference profile selected for the first controlled
+      RojAnda test. Constrained to Nova Lite so the worker IAM policy can remain
+      exact; expanding models later requires an explicit template/IAM review.
+  AllowBedrock:
+    Type: String
+    Default: "0"
+    AllowedValues: ["0", "1"]
+    Description: >
+      Hard safety gate. Bedrock is only ever invoked when this is "1" AND
+      StudyProvider=bedrock. Keeps paid models off by default.
+
+Conditions:
+  # Bedrock is "really on" only when the provider is bedrock AND the hard safety
+  # gate is open. This single condition drives BOTH the conditional IAM grant
+  # and the async pipeline: with the default (local / "0") NO Bedrock permission
+  # and NO queue/worker exist — the local provider runs inline in the API
+  # Lambda (deterministic, sub-second, no HTTP-timeout risk). When Bedrock is
+  # enabled, the API Lambda enqueues and a worker Lambda does the long work off
+  # the 30s API Gateway request path.
+  BedrockEnabled: !And
+    - !Equals [!Ref StudyProvider, bedrock]
+    - !Equals [!Ref AllowBedrock, "1"]
 
 Globals:
   Function:
@@ -198,6 +238,94 @@ Resources:
             Resource:
               - !GetAtt AppTable.Arn
 
+  # ---------------------------------------------------------------------------
+  # Async study-generation pipeline (ONLY created when Bedrock is enabled).
+  # Dead-letter queue first so the main queue can reference it.
+  # ---------------------------------------------------------------------------
+  StudyJobDLQ:
+    Type: AWS::SQS::Queue
+    Condition: BedrockEnabled
+    Properties:
+      QueueName: rojanda-study-jobs-dlq
+      MessageRetentionPeriod: 1209600   # 14 days to inspect poisoned jobs
+
+  StudyJobQueue:
+    Type: AWS::SQS::Queue
+    Condition: BedrockEnabled
+    Properties:
+      QueueName: rojanda-study-jobs
+      # Visibility must exceed the worker's max run time so a job is not
+      # redelivered while still being processed (would risk a duplicate run;
+      # the claim-token idempotency still guards spend, but this avoids the race
+      # entirely). Worker timeout is 300s below; 360s gives margin.
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt StudyJobDLQ.Arn
+        maxReceiveCount: 3
+
+  # API policy: enqueue only. The API Lambda never gets queue-consumer or
+  # Bedrock permissions. Conditional means default/local deployments add no SQS
+  # rights to the existing API role.
+  StudyApiQueuePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: BedrockEnabled
+    Properties:
+      ManagedPolicyName: rojanda-study-api-queue-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SendStudyJobsOnly
+            Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt StudyJobQueue.Arn
+
+  # Worker-only policy: minimum DynamoDB reads/writes used by run_study_job,
+  # consumption of the MAIN queue only (SQS itself handles DLQ redrive), logs,
+  # and InvokeModel only through the approved EU Nova Lite inference profile +
+  # its exact destination foundation-model ARNs. No Transcribe or S3 access.
+  StudyWorkerExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: BedrockEnabled
+    Properties:
+      ManagedPolicyName: rojanda-study-worker-execution-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: WorkerLogsOnly
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/rojanda-study-worker*
+          - Sid: WorkerStudyTableOnly
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+            Resource: !GetAtt AppTable.Arn
+          - Sid: ConsumeStudyJobsOnly
+            Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt StudyJobQueue.Arn
+          - Sid: InvokeApprovedStudyModelOnly
+            Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource:
+              # The inference profile passed as modelId.
+              - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              # Exact foundation models the ACTIVE EU Nova Lite profile may
+              # route to (verified read-only before deployment review).
+              - arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-lite-v1:0
+              - arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-lite-v1:0
+              - arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-lite-v1:0
+              - arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-lite-v1:0
+
   TranscribeExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -212,6 +340,24 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Ref TranscribeExecutionPolicy
+        # API gets ONLY SendMessage, and only when async Bedrock is enabled.
+        - !If [BedrockEnabled, !Ref StudyApiQueuePolicy, !Ref "AWS::NoValue"]
+
+  StudyWorkerExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: BedrockEnabled
+    Properties:
+      RoleName: rojanda-study-worker-exec-role
+      PermissionsBoundary: !Ref ExecutionRolePermissionsBoundaryArn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref StudyWorkerExecutionPolicy
 
   TranscribeFunction:
     Type: AWS::Serverless::Function
@@ -223,6 +369,12 @@ Resources:
       CodeUri: src/
       Handler: rojanda_transcribe.api.handler
       Role: !GetAtt TranscribeExecutionRole.Arn
+      # The API handler never runs the long study MAP/REDUCE: with the local
+      # provider it generates inline (deterministic, sub-second); with Bedrock
+      # it ENQUEUES and returns 202 immediately. So the API stays within the
+      # API Gateway HTTP API hard 30s integration timeout. (The heavy work runs
+      # in StudyWorkerFunction below.)
+      Timeout: 30
       Environment:
         Variables:
           ROJANDA_MEDIA_BUCKET: !Ref MediaBucketName
@@ -231,6 +383,10 @@ Resources:
           ROJANDA_MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
           ROJANDA_DAILY_MINUTES_ALLOWANCE: !Ref DailyMinutesAllowancePerIdentity
           ROJANDA_TRANSCRIBE_LANGUAGE: tr-TR
+          # The API receives only the queue URL. It receives neither Bedrock
+          # configuration nor Bedrock IAM permission. Empty when the local
+          # provider is used, so the deterministic local generator runs inline.
+          ROJANDA_STUDY_QUEUE_URL: !If [BedrockEnabled, !Ref StudyJobQueue, ""]
       Events:
         # Student profile
         GetProfile:
@@ -320,6 +476,19 @@ Resources:
             ApiId: !Ref TranscribeApi
             Path: "/courses/{courseId}/lessons/{lessonId}/transcripts"
             Method: GET
+        # Study materials (Phase 2): grounded, server-persisted, idempotent.
+        ListStudy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TranscribeApi
+            Path: "/courses/{courseId}/lessons/{lessonId}/study"
+            Method: GET
+        GenerateStudy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TranscribeApi
+            Path: "/courses/{courseId}/lessons/{lessonId}/study"
+            Method: POST
         # Transcription
         UploadUrl:
           Type: HttpApi
@@ -339,6 +508,49 @@ Resources:
             ApiId: !Ref TranscribeApi
             Path: /transcribe/status
             Method: GET
+
+  # ---------------------------------------------------------------------------
+  # Background study-generation worker (ONLY when Bedrock is enabled). Consumes
+  # the study-job queue and performs the grounded MAP/REDUCE off the API request
+  # path, so a full ~50-min lesson is not bound by the API Gateway 30s window.
+  # Reuses the same code package but has a dedicated least-privilege execution
+  # role. The API role cannot invoke Bedrock; only this worker role can.
+  # ---------------------------------------------------------------------------
+  StudyWorkerFunction:
+    Type: AWS::Serverless::Function
+    Condition: BedrockEnabled
+    Properties:
+      FunctionName: rojanda-study-worker
+      Description: >
+        Grounded study-material generator. SQS-triggered; reads the authoritative
+        transcript, runs the bounded MAP/REDUCE, persists ready/failed. Not on
+        the API request path.
+      CodeUri: src/
+      Handler: rojanda_transcribe.worker.handler
+      Role: !GetAtt StudyWorkerExecutionRole.Arn
+      # Sized for the WORK (a full ~50-min lesson's chunk calls + synthesis),
+      # not the HTTP window. Must stay below the queue VisibilityTimeout (360s).
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          ROJANDA_MEDIA_BUCKET: !Ref MediaBucketName
+          ROJANDA_APP_TABLE: !Ref AppTable
+          ROJANDA_TRANSCRIBE_LANGUAGE: tr-TR
+          # The worker is the ONLY place that constructs the Bedrock provider.
+          ROJANDA_STUDY_PROVIDER: !Ref StudyProvider
+          ROJANDA_BEDROCK_MODEL_ID: !Ref BedrockModelId
+          ROJANDA_ALLOW_BEDROCK: !Ref AllowBedrock
+      Events:
+        StudyJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt StudyJobQueue.Arn
+            BatchSize: 1
+            # Report per-item failures so one bad job is retried/DLQ'd without
+            # reprocessing a whole batch (worker returns batchItemFailures).
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   # ---------------------------------------------------------------------------
   # HTTP API. All routes require a valid Cognito USER POOL JWT (the authorizer

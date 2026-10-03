@@ -8,6 +8,7 @@ import {
   ApiCourseService,
   ApiLessonService,
   ApiProfileService,
+  ApiStudyService,
   ApiTranscriptService,
   selectLessonTranscriptText,
 } from "./ApiServices";
@@ -141,6 +142,138 @@ describe("ApiTranscriptService (server-persisted lesson transcripts)", () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ transcripts: [] }) });
     const api = createApiClient("https://api.example.com", async () => "jwt");
     await expect(new ApiTranscriptService(api).listByLesson("c", "l")).resolves.toEqual([]);
+  });
+});
+
+describe("ApiStudyService (server-persisted grounded study materials)", () => {
+  const mockFetch = jest.fn();
+  beforeEach(() => {
+    (global as any).fetch = mockFetch;
+    mockFetch.mockReset();
+  });
+
+  const readyStudy = {
+    lessonId: "lesson_1",
+    courseId: "course_1",
+    sourceId: "src_1",
+    status: "ready",
+    summary: "Fotosentez özetidir.",
+    concepts: [{ name: "Kloroplast", explanation: "Organeldir.", chunkIndex: 0 }],
+    flashcards: [{ front: "Nedir?", back: "Budur.", chunkIndex: 0 }],
+    quiz: [
+      {
+        prompt: "Soru?",
+        options: ["A", "B", "C", "D"],
+        correctIndex: 0,
+        explanation: "Çünkü.",
+        topic: "x",
+        chunkIndex: 0,
+      },
+    ],
+    chunkCount: 1,
+    transcriptFingerprint: "sha256:abc",
+    stale: false,
+    provenance: "Kaynaklarından",
+    provider: "local-grounded-v2",
+    language: "tr",
+    schemaVersion: 2,
+    createdAt: "2026-09-30T19:40:34Z",
+    updatedAt: "2026-09-30T19:41:00Z",
+  };
+
+  it("GETs the nested study route read-only (no body) and maps the result", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ study: [readyStudy] }) });
+    const api = createApiClient("https://api.example.com", async () => "jwt-s");
+    const sets = await new ApiStudyService(api).listByLesson("course_1", "lesson_1");
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.example.com/courses/course_1/lessons/lesson_1/study");
+    expect(init.method).toBe("GET");
+    expect(init.headers.Authorization).toBe("Bearer jwt-s");
+    expect(init.body).toBeUndefined();
+    expect(sets).toHaveLength(1);
+    expect(sets[0].status).toBe("ready");
+    expect(sets[0].provenance).toBe("Kaynaklarından");
+    expect(sets[0].concepts?.[0].name).toBe("Kloroplast");
+    expect(sets[0].stale).toBe(false);
+  });
+
+  it("generate POSTs an empty body by default (idempotent, no force) and never sends ownerId", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => readyStudy });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    const r = await new ApiStudyService(api).generate("course_1", "lesson_1");
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.example.com/courses/course_1/lessons/lesson_1/study");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body);
+    expect(body).toEqual({});
+    expect(body).not.toHaveProperty("ownerId");
+    expect(r.status).toBe("ready");
+  });
+
+  it("generate with force true sends {force:true} (explicit regenerate)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => readyStudy });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    await new ApiStudyService(api).generate("course_1", "lesson_1", { force: true });
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body).toEqual({ force: true });
+  });
+
+  it("treats a 202 async hand-off as a generating set (drives UI polling)", async () => {
+    // The backend returns 202 Accepted with a generating item when it enqueues
+    // a background job; the client must surface status 'generating' so the
+    // lesson screen starts polling GET /study.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({
+        lessonId: "lesson_1",
+        courseId: "course_1",
+        sourceId: "src_1",
+        status: "generating",
+        provenance: "Kaynaklarından",
+        createdAt: "t",
+      }),
+    });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    const r = await new ApiStudyService(api).generate("course_1", "lesson_1");
+    expect(r.status).toBe("generating");
+    expect(r.summary).toBeUndefined(); // nothing fabricated while generating
+  });
+
+  it("fails closed without a session (no request sent)", async () => {
+    const api = createApiClient("https://api.example.com", async () => null);
+    await expect(new ApiStudyService(api).listByLesson("c", "l")).rejects.toBeInstanceOf(NotAuthenticatedError);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty list before any generation", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ study: [] }) });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    await expect(new ApiStudyService(api).listByLesson("c", "l")).resolves.toEqual([]);
+  });
+
+  it("maps a failed study item (retryable; no fabricated content)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        study: [
+          {
+            lessonId: "lesson_1",
+            courseId: "course_1",
+            sourceId: "src_1",
+            status: "failed",
+            error: "study_provider_error",
+            createdAt: "t",
+          },
+        ],
+      }),
+    });
+    const api = createApiClient("https://api.example.com", async () => "jwt");
+    const sets = await new ApiStudyService(api).listByLesson("course_1", "lesson_1");
+    expect(sets[0].status).toBe("failed");
+    expect(sets[0].summary).toBeUndefined();
+    expect(sets[0].error).toBe("study_provider_error");
   });
 });
 

@@ -210,6 +210,88 @@ export interface StudySet {
   podcast?: Podcast;
 }
 
+// --- Server-persisted study materials (Phase 2) ----------------------------
+
+/**
+ * Lifecycle of a server-generated study set. Mirrors the backend
+ * STUDY#<lessonId>#<sourceId> item's `status` field so the mobile UI can show
+ * not-generated / generating / ready / failed states without guessing.
+ */
+export type StudyStatus = "generating" | "ready" | "failed";
+
+/**
+ * A key concept as returned by the grounded backend. Unlike the local
+ * {@link Concept}, each artifact carries the index of the transcript chunk it
+ * was grounded in (long-lesson map/reduce provenance).
+ */
+export interface ServerConcept {
+  name: string;
+  explanation: string;
+  chunkIndex?: number | null;
+}
+
+export interface ServerFlashcard {
+  front: string;
+  back: string;
+  chunkIndex?: number | null;
+}
+
+/**
+ * A grounded multiple-choice question from the backend. The correct answer is
+ * guaranteed by the backend to appear in the transcript (ungrounded questions
+ * are dropped server-side, never fabricated).
+ */
+export interface ServerQuizQuestion {
+  prompt: string;
+  options: string[]; // exactly 4
+  correctIndex: number; // 0..3
+  explanation: string;
+  topic?: string;
+  chunkIndex?: number | null;
+}
+
+/**
+ * The server-persisted, grounded study material for one lesson transcript
+ * source (backend SK = STUDY#<lessonId>#<sourceId>).
+ *
+ * PERSISTENCE + PROVENANCE: survives restart/sign-out and loads on any device
+ * for the same account WITHOUT another model call. Every item records which
+ * lesson + source + transcript it was built from. `transcriptFingerprint` is a
+ * content hash of the transcript at generation time; `stale` is computed by the
+ * backend on read by comparing it to the CURRENT transcript, so the UI can
+ * offer regeneration without silently spending a model call.
+ *
+ * GROUNDING: `provenance` is always "Kaynaklarından" ("from your sources") — the
+ * content is extracted from the student's own transcript, never invented.
+ */
+export interface ServerStudySet {
+  lessonId: Id;
+  courseId: Id;
+  sourceId: Id;
+  status: StudyStatus;
+  /** Present once `status === "ready"`. */
+  summary?: string;
+  concepts?: ServerConcept[];
+  flashcards?: ServerFlashcard[];
+  quiz?: ServerQuizQuestion[];
+  /** Number of transcript chunks the material was mapped/reduced over. */
+  chunkCount?: number;
+  /** Content hash of the transcript the material was generated from. */
+  transcriptFingerprint?: string;
+  /** True when the current transcript no longer matches `transcriptFingerprint`. */
+  stale?: boolean;
+  /** Always "Kaynaklarından" — grounded in the student's own material. */
+  provenance?: string;
+  /** Which provider produced it (e.g. "local-grounded-v2" or "bedrock"). */
+  provider?: string;
+  language?: Locale;
+  schemaVersion?: number;
+  /** Error code when `status === "failed"` (retryable). */
+  error?: string;
+  createdAt: ISODateString;
+  updatedAt?: ISODateString;
+}
+
 // --- Notes (Notlarım) ------------------------------------------------------
 
 export type NoteKind = "typed" | "voice";

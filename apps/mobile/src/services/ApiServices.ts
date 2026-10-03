@@ -8,8 +8,8 @@
  * intentionally IGNORED here — the client never sends an ownerId as
  * authorization (the backend would ignore it anyway).
  */
-import type { Course, Id, Lesson, StudentProfile, User } from "@rojanda/types";
-import type { CourseService, LessonService, ProfileService } from "@rojanda/api";
+import type { Course, Id, Lesson, ServerStudySet, StudentProfile, User } from "@rojanda/types";
+import type { CourseService, LessonService, ProfileService, ServerStudyService } from "@rojanda/api";
 import type { ApiClient } from "./apiClient";
 
 // --- Profile ----------------------------------------------------------------
@@ -209,5 +209,63 @@ function toLesson(l: any): Lesson {
     status: l.status ?? "draft",
     durationSec: l.durationSec,
     createdAt: l.createdAt,
+  };
+}
+
+// --- Study materials (server-persisted, grounded; Phase 2) ------------------
+/**
+ * Reads + generates the server-persisted grounded study materials for a lesson
+ * (backend STUDY#<lessonId>#<sourceId>). `listByLesson` is read-only and never
+ * triggers a model call; `generate` is idempotent on the backend (repeated taps
+ * return the existing ready item). `force` is only used for an explicit
+ * regenerate after the transcript changed. All content is grounded in the
+ * student's own transcript — the client never fabricates study material.
+ */
+export class ApiStudyService implements ServerStudyService {
+  constructor(private api: ApiClient) {}
+
+  async listByLesson(courseId: Id, lessonId: Id): Promise<ServerStudySet[]> {
+    const r = await this.api.get<{ study: any[] }>(
+      `/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}/study`
+    );
+    return (r.study ?? []).map(toServerStudy);
+  }
+
+  async generate(
+    courseId: Id,
+    lessonId: Id,
+    opts?: { force?: boolean; sourceId?: Id }
+  ): Promise<ServerStudySet> {
+    const body: Record<string, unknown> = {};
+    if (opts?.force) body.force = true;
+    if (opts?.sourceId) body.sourceId = opts.sourceId;
+    const s = await this.api.post<any>(
+      `/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}/study`,
+      body
+    );
+    return toServerStudy(s);
+  }
+}
+
+function toServerStudy(s: any): ServerStudySet {
+  return {
+    lessonId: s?.lessonId ?? "",
+    courseId: s?.courseId ?? "",
+    sourceId: s?.sourceId ?? "",
+    status: s?.status ?? "generating",
+    summary: typeof s?.summary === "string" ? s.summary : undefined,
+    concepts: Array.isArray(s?.concepts) ? s.concepts : undefined,
+    flashcards: Array.isArray(s?.flashcards) ? s.flashcards : undefined,
+    quiz: Array.isArray(s?.quiz) ? s.quiz : undefined,
+    chunkCount: typeof s?.chunkCount === "number" ? s.chunkCount : undefined,
+    transcriptFingerprint: s?.transcriptFingerprint,
+    stale: typeof s?.stale === "boolean" ? s.stale : undefined,
+    provenance: s?.provenance,
+    provider: s?.provider,
+    language: s?.language,
+    schemaVersion: typeof s?.schemaVersion === "number" ? s.schemaVersion : undefined,
+    error: s?.error,
+    createdAt: s?.createdAt ?? "",
+    updatedAt: s?.updatedAt,
   };
 }

@@ -10,13 +10,19 @@ from __future__ import annotations
 import copy
 
 
-class FakeConditionalCheckFailed(Exception):
-    pass
+class ConditionalCheckFailedException(Exception):
+    """Mirrors botocore's exception class NAME so production code that branches
+    on `type(e).__name__ == "ConditionalCheckFailedException"` works unchanged
+    against the fake."""
+
+
+# Back-compat alias for existing references in this module/tests.
+FakeConditionalCheckFailed = ConditionalCheckFailedException
 
 
 class FakeDynamo:
     class exceptions:
-        ConditionalCheckFailedException = FakeConditionalCheckFailed
+        ConditionalCheckFailedException = ConditionalCheckFailedException
 
     def __init__(self):
         # (pk, sk) -> item dict (raw DynamoDB attribute-value form)
@@ -29,8 +35,21 @@ class FakeDynamo:
         it = self.items.get(self._key(Key))
         return {"Item": copy.deepcopy(it)} if it else {}
 
-    def put_item(self, TableName, Item):
-        self.items[(Item["pk"]["S"], Item["sk"]["S"])] = copy.deepcopy(Item)
+    def put_item(self, TableName, Item, ConditionExpression=None,
+                 ExpressionAttributeValues=None, ExpressionAttributeNames=None):
+        key = (Item["pk"]["S"], Item["sk"]["S"])
+        # Honor the study-claim conditional write:
+        #   "attribute_not_exists(sk) OR startedAtEpoch < :fresh"
+        if ConditionExpression and "startedAtEpoch" in ConditionExpression:
+            existing = self.items.get(key)
+            if existing is not None:
+                cur = existing.get("startedAtEpoch", {}).get("N")
+                fresh = (ExpressionAttributeValues or {}).get(":fresh", {}).get("N")
+                # Claim is held (fails) when the existing claim is still fresh
+                # (startedAtEpoch >= :fresh). Reclaim allowed only when stale.
+                if cur is not None and fresh is not None and not (float(cur) < float(fresh)):
+                    raise FakeConditionalCheckFailed()
+        self.items[key] = copy.deepcopy(Item)
 
     def delete_item(self, TableName, Key):
         self.items.pop(self._key(Key), None)
@@ -135,6 +154,21 @@ class FakeS3:
             from botocore.exceptions import ClientError as BotoClientError
             raise BotoClientError({"Error": {"Code": "404"}}, "HeadObject")
         return {"ContentLength": self._size}
+
+
+class FakeSQS:
+    """In-memory SQS stand-in for the async study pipeline. Records every
+    send_message so tests can assert exactly how many jobs were enqueued (the
+    core anti-duplicate-spend check: a retry must NOT enqueue a second job)."""
+
+    def __init__(self):
+        self.sent = []  # list of parsed message bodies, in order
+
+    def send_message(self, QueueUrl, MessageBody):
+        import json as _json
+
+        self.sent.append(_json.loads(MessageBody))
+        return {"MessageId": f"msg-{len(self.sent)}"}
 
 
 class FakeTranscribe:

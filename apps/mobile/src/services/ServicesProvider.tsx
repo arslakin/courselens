@@ -8,7 +8,13 @@ import { ExpoRecordingService } from "./ExpoRecordingService";
 import { makeTranscription } from "./makeTranscription";
 import { makeAuthProvider } from "../auth/makeAuthProvider";
 import { createApiClient } from "./apiClient";
-import { ApiCourseService, ApiLessonService, ApiProfileService, ApiTranscriptService } from "./ApiServices";
+import {
+  ApiCourseService,
+  ApiLessonService,
+  ApiProfileService,
+  ApiStudyService,
+  ApiTranscriptService,
+} from "./ApiServices";
 
 /**
  * Provides the app's Services to all screens via context.
@@ -26,6 +32,8 @@ interface ServicesBundle {
   usesApiPersistence: boolean;
   /** Server-persisted transcripts reader; null in local/offline mode. */
   transcripts: ApiTranscriptService | null;
+  /** Server-persisted grounded study materials; null in local/offline mode. */
+  study: ApiStudyService | null;
 }
 const ServicesContext = createContext<ServicesBundle | null>(null);
 
@@ -51,6 +59,7 @@ export function ServicesProvider({ children }: { children: React.ReactNode }) {
     // (profile/course/lesson) with authenticated API-backed repositories.
     const apiConfigured = API_BASE_URL !== "" && isCognitoConfigured;
     let transcripts: ApiTranscriptService | null = null;
+    let study: ApiStudyService | null = null;
     if (apiConfigured) {
       const api = createApiClient(API_BASE_URL, getIdToken);
       const courses = new ApiCourseService(api);
@@ -60,9 +69,12 @@ export function ServicesProvider({ children }: { children: React.ReactNode }) {
       // Recording audio/sources stay local in Phase 1; the transcript TEXT is
       // server-persisted and read through this authenticated endpoint.
       transcripts = new ApiTranscriptService(api);
+      // Phase 2: grounded study materials are generated + persisted server-side
+      // and loaded here (no model call on read).
+      study = new ApiStudyService(api);
     }
 
-    return { services, backend, usesApiPersistence: apiConfigured, transcripts };
+    return { services, backend, usesApiPersistence: apiConfigured, transcripts, study };
   }, []);
   return <ServicesContext.Provider value={bundle}>{children}</ServicesContext.Provider>;
 }
@@ -84,6 +96,13 @@ export function useTranscriptService(): ApiTranscriptService | null {
   const ctx = useContext(ServicesContext);
   if (!ctx) throw new Error("useTranscriptService must be used within ServicesProvider");
   return ctx.transcripts;
+}
+
+/** Server-persisted grounded study materials (null when running local/offline). */
+export function useStudyService(): ApiStudyService | null {
+  const ctx = useContext(ServicesContext);
+  if (!ctx) throw new Error("useStudyService must be used within ServicesProvider");
+  return ctx.study;
 }
 
 export function useUsesApiPersistence(): boolean {
